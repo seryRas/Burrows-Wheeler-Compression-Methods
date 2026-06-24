@@ -1,0 +1,6 @@
+---
+Language: C
+BasedOnStyle: Google
+IndentWidth: 4
+ContinuationIndentWidth: 4
+...
