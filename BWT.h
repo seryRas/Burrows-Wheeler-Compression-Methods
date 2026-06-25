@@ -1,5 +1,7 @@
 #include <stdio.h>
-
+#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
 
 
 typedef struct {
@@ -10,7 +12,7 @@ typedef struct {
 
 typedef struct {
     size_t currentLen;
-    size_t indexArray[sizeof(size_t)];
+    size_t *indexArray;
 } sortingArray;
 
 unsigned short bwtTransform(unsigned char* input, bwt_out* output);

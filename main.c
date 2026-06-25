@@ -3,9 +3,9 @@
 
 
 int main() {
-    char arr[] = "pernik";
+    char arr[] = "ppppernik";
 
-    bwt_out out = {.size = 6};
-    bwt_transform((unsigned char *)arr, &out);
+    bwt_out out = {.size = sizeof(arr)};
+    bwtTransform((unsigned char *)arr, &out);
     return 0;
 }
