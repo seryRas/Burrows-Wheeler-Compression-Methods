@@ -1,29 +1,42 @@
 #include "BWT.h"
 
-void sortTable(unsigned char* input, size_t inputSize, size_t* result, size_t j,
-               size_t* resultIndex) {
-    size_t index;
-    sortingArray arr[0xFF] = {0};
-    for (size_t i = 0; i < inputSize; i++) {
-        index = i + j;
-        if (index >= inputSize) index -= inputSize;
-        arr[input[index]].indexArray[arr[input[index]].currentLen++] = i;
+void sortTable(unsigned char* input, size_t endInArr, size_t startInArr,
+               size_t* current, size_t* swap, size_t j, size_t inputSize) {
+    size_t count[0x100] = {0};
+    size_t valueBegin[0x100] = {0};
+    size_t currentValueEnd[0x100] = {0};
+
+    for (size_t i = startInArr; i < endInArr; i++) {
+        count[input[(current[i] + j) % inputSize]]++;
+    }
+    size_t currentIndex = 0;
+    for (int i = 0; i < 0x100; i++) {
+        if (count[i] > 0) {
+            valueBegin[i] = currentIndex + startInArr;
+            currentValueEnd[i] = currentIndex + startInArr;
+            currentIndex += count[i];
+        }
     }
 
-    for (int i = 0; i < 0xFF; i++) {
-        if (arr[i].currentLen > 1) {
-            sortTable(input, inputSize, result, j + 1, resultIndex);
-        } else if (arr[i].currentLen == 1)
-            result[(*resultIndex)++] = arr[i].indexArray[0];
+    for (size_t i = startInArr; i < endInArr; i++) {
+        swap[currentValueEnd[input[(current[i] + j) % inputSize]]++] =
+            current[i];
     }
-
+    memcpy(current + startInArr, swap + startInArr,
+           sizeof(size_t) * (endInArr - startInArr));
+    for (int i = 0; i < 0x100; i++) {
+        if (count[i] > 1) {
+            sortTable(input, currentValueEnd[i], valueBegin[i], current, swap,
+                      j + 1, inputSize);
+        }
+    }
 }
 
-void test(unsigned char *input, size_t *res) {
-    for(int i = 0; i < strlen(input); i++) {
-        for(int j = 0; j < strlen(input); j++) {
-            int index = j + res[i];
-            if(index >= strlen(input)) index -= strlen(input);
+void test(unsigned char* input, size_t* res) {
+    for (size_t i = 0; i < strlen((char*)input); i++) {
+        for (size_t j = 0; j < strlen((char*)input); j++) {
+            size_t index = j + res[i];
+            if (index >= strlen((char*)input)) index -= strlen((char*)input);
             printf("%c", input[index]);
         }
         printf("\n");
@@ -32,9 +45,12 @@ void test(unsigned char *input, size_t *res) {
 
 unsigned short bwtTransform(unsigned char* input, bwt_out* output) {
     size_t* sortedIndexes = malloc(sizeof(size_t) * output->size);
-    size_t finalIndex = 0;
-    sortTable(input, output->size, sortedIndexes, 0, &finalIndex);
-    for(size_t i = 0; i < finalIndex; i++) printf("%lu\n", sortedIndexes[i]);
+    size_t* helperArr = malloc(sizeof(size_t) * output->size);
+    for (size_t i = 0; i < output->size; i++) sortedIndexes[i] = i;
+    sortTable(input, output->size, 0, sortedIndexes, helperArr, 0,
+              output->size);
+    free(helperArr);
+    for (size_t i = 0; i < output->size; i++) printf("%lu\n", sortedIndexes[i]);
     test(input, sortedIndexes);
     free(sortedIndexes);
     return 0;
