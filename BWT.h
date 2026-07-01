@@ -3,10 +3,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef enum {
+    succes = 0,
+    mallocErr,
+    emptyInput,
+
+} errors;
+
 typedef struct {
     unsigned char* data;
     size_t size;
-    size_t index;
+    size_t initialIndex;
 } bwt_out;
 
-unsigned short bwtTransform(unsigned char* input, bwt_out* output);
+errors bwtTransform(unsigned char* input, bwt_out* output);
