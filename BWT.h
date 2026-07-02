@@ -17,3 +17,5 @@ typedef struct {
 } bwt_out;
 
 errors bwtTransform(unsigned char* input, bwt_out* output);
+
+errors bwtRetransform(bwt_out* input, unsigned char* output);

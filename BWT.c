@@ -1,7 +1,8 @@
 #include "BWT.h"
 
 void sortTable(unsigned char* input, size_t endInArr, size_t startInArr,
-               size_t* current, size_t* swap, size_t j, size_t inputSize) {
+               size_t* current, size_t* swap, size_t j, size_t inputSize,
+               bool simple) {
     size_t count[0x100] = {0};
     size_t valueBegin[0x100] = {0};
     size_t currentValueEnd[0x100] = {0};
@@ -25,22 +26,14 @@ void sortTable(unsigned char* input, size_t endInArr, size_t startInArr,
     }
     memcpy(current + startInArr, swap + startInArr,
            sizeof(size_t) * (endInArr - startInArr));
+
+    if (simple) return;
+
     for (int i = 0; i < 0x100; i++) {
         if (count[i] > 1) {
             sortTable(input, currentValueEnd[i], valueBegin[i], current, swap,
-                      j + 1, inputSize);
+                      j + 1, inputSize, false);
         }
-    }
-}
-
-void test(unsigned char* input, size_t* res) {
-    for (size_t i = 0; i < strlen((char*)input); i++) {
-        for (size_t j = 0; j < strlen((char*)input); j++) {
-            size_t index = j + res[i];
-            if (index >= strlen((char*)input)) index -= strlen((char*)input);
-            printf("%c", input[index]);
-        }
-        printf("\n");
     }
 }
 
@@ -55,8 +48,8 @@ errors bwtTransform(unsigned char* input, bwt_out* output) {
     }
 
     for (size_t i = 0; i < output->size; i++) sortedIndexes[i] = i;
-    sortTable(input, output->size, 0, sortedIndexes, helperArr, 0,
-              output->size);
+    sortTable(input, output->size, 0, sortedIndexes, helperArr, 0, output->size,
+              false);
     free(helperArr);
     for (size_t i = 0; i < output->size; i++) {
         output->data[i] =
@@ -67,8 +60,7 @@ errors bwtTransform(unsigned char* input, bwt_out* output) {
     return succes;
 }
 
-
-errors bwtRetransform(bwt_out *input, unsigned char *output) {
+errors bwtRetransform(bwt_out* input, unsigned char* output) {
     if (input->size == 0) return emptyInput;
     size_t* sortedIndexes = malloc(sizeof(size_t) * input->size);
     if (sortedIndexes == NULL) return mallocErr;
@@ -80,8 +72,13 @@ errors bwtRetransform(bwt_out *input, unsigned char *output) {
 
     for (size_t i = 0; i < input->size; i++) sortedIndexes[i] = i;
     sortTable(input->data, input->size, 0, sortedIndexes, helperArr, 0,
-              input->size);
+              input->size, true);
     free(helperArr);
-    
-}
 
+    size_t dataIndex = input->initialIndex;
+    for (size_t i = 0; i < input->size; i++) {
+        output[i] = input->data[sortedIndexes[dataIndex]];
+        dataIndex = sortedIndexes[dataIndex];
+    }
+    return succes;
+}
