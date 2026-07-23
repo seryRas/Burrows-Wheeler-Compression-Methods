@@ -1,31 +1,39 @@
 #include "BWT.h"
-
+#include <time.h>
 
 int main(int argc, char **argv) {
+    if(argc < 2) {
+        fprintf(stderr, "You need to run this program with file path\n");
+        return generalError;
+    }
     FILE *testInput = fopen(argv[1], "r");
-    char c;
-    size_t sizeArr = 0x4FFFFFF;
-    unsigned char *arr = malloc(sizeArr);
-    size_t i = 0;
+    if(!testInput) {
+        fprintf(stderr, "Failed to open file\n");
+        return fileErr;
+    }
 
-    while((c = getc(testInput)) != EOF) {
-        arr[i++] = c;
-        if(i >= sizeArr) {
-            fprintf(stderr, "File too big\n");
-            return 1;
-        }
+    fseek(testInput, 0, SEEK_END);
+    size_t fileSize = ftell(testInput);
+    rewind(testInput);
+
+    unsigned char *arr = malloc(fileSize + 1);
+    if(!arr) {
+        fprintf(stderr, "malloc failed\n");
+        fclose(testInput);
+        return mallocErr;
     }
     
+    fread(arr, 1, fileSize, testInput);
+    arr[fileSize] = '\0';
 
 
-    bwt_out out = {.size = i - 1};
-    if ((out.data = malloc(i - 1)) == NULL) return mallocErr;
+    bwt_out out = {.size = fileSize};
+    if ((out.data = malloc(fileSize)) == NULL) return mallocErr;
+
+    clock_t startTime = clock();
     bwtTransform((unsigned char*)arr, &out);
-    for (unsigned int i = 0; i < i - 1; i++)
-        printf("%c", out.data[i]);
-    printf("\n");
-    unsigned char* output = malloc(i);
-    bwtRetransform(&out, output);
-    fprintf(stdout, "%s\n", output);
-    return 0;
+    clock_t endTime = clock();
+    double elapsedMs = ((double)(endTime - startTime) / CLOCKS_PER_SEC) * 1000;
+    fprintf(stdout, "Execution time: %f ms\n", elapsedMs);
+    return succes;
 }
