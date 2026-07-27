@@ -7,6 +7,7 @@
 #define L_TYPE false
 #define BEGIN 0
 #define END 1
+#define AMOUNT_OF_VALUES 0x100
 typedef enum {
     succes = 0,
     mallocErr,
