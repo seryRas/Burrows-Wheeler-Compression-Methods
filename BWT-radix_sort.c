@@ -57,7 +57,7 @@ errors bwtTransform(unsigned char* input, bwt_out* output) {
         if (sortedIndexes[i] == 0) output->initialIndex = i;
     }
     free(sortedIndexes);
-    return succes;
+    return success;
 }
 
 errors bwtRetransform(bwt_out* input, unsigned char* output) {
@@ -80,5 +80,5 @@ errors bwtRetransform(bwt_out* input, unsigned char* output) {
         output[i] = input->data[sortedIndexes[dataIndex]];
         dataIndex = sortedIndexes[dataIndex];
     }
-    return succes;
+    return success;
 }

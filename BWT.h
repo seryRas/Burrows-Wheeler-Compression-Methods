@@ -9,15 +9,13 @@
 #define END 1
 #define AMOUNT_OF_VALUES 0x100
 typedef enum {
-    succes = 0,
+    success = 0,
     mallocErr,
     emptyInput,
     fileErr,
     generalError,
 
 } errors;
-
-
 
 typedef struct {
     unsigned char* data;
@@ -26,8 +24,14 @@ typedef struct {
 } bwt_out;
 
 typedef struct {
+    size_t* data;
+    size_t size;
+    size_t initialIndex;
+} rec_sais_out;
+
+typedef struct {
     size_t indexAmount;
-    size_t *array;
+    size_t* array;
 } LMSArray;
 
 errors bwtTransform(unsigned char* input, bwt_out* output);

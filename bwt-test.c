@@ -40,7 +40,7 @@ testResult runTransformationCase(transformationCase testCase) {
     if ((result.data = malloc(testCase.inputSize + 1)) == NULL) return error;
     result.data[testCase.inputSize] = '\0';
 
-    if (bwtTransform(testCase.input, &result) != succes) {
+    if (bwtTransform(testCase.input, &result) != success) {
         free(result.data);
         return error;
     }
@@ -91,7 +91,7 @@ testResult runRetransformCase(retransformCase testCase) {
     if (output == NULL) return error;
     output[testCase.inputSize] = '\0';
 
-    if (bwtRetransform(&transformed, output) != succes) {
+    if (bwtRetransform(&transformed, output) != success) {
         free(output);
         return error;
     }
@@ -114,7 +114,7 @@ testResult runRoundTripCase(roundTripCase testCase) {
     if (transformed.data == NULL) return error;
     transformed.data[testCase.inputSize] = '\0';
 
-    if (bwtTransform(testCase.input, &transformed) != succes) {
+    if (bwtTransform(testCase.input, &transformed) != success) {
         free(transformed.data);
         return error;
     }
@@ -126,7 +126,7 @@ testResult runRoundTripCase(roundTripCase testCase) {
     }
     output[testCase.inputSize] = '\0';
 
-    if (bwtRetransform(&transformed, output) != succes) {
+    if (bwtRetransform(&transformed, output) != success) {
         free(output);
         free(transformed.data);
         return error;
