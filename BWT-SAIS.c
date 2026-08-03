@@ -102,40 +102,32 @@ bool sizetCompareLmsSubstrings(size_t* input, bool* typedIdx, size_t s1Idx,
 }
 
 errors sizetFindSameSubstrings(size_t* input, size_t* sufArr, bool* typedOut,
-                               size_t len) {
+                               size_t len, LMSArray *lmsArr, size_t **finalOrder) {
     size_t index;
     size_t lastLMSIndex = __SIZE_MAX__;
     size_t name = 0;
     size_t* nameArr = malloc(sizeof(size_t) * (len + 1));
     if (!nameArr) return mallocErr;
     size_t savedNames = 0;
-    size_t* denseArr = malloc(sizeof(size_t) * (len + 1));
-    if (!denseArr) {
-        free(nameArr);
-        return mallocErr;
-    }
     size_t* originalLMSIndexes = malloc(sizeof(size_t) * (len + 1));
     if(!originalLMSIndexes) {
         free(nameArr);
-        free(denseArr);
         return mallocErr;
     }
     memset(nameArr, -1, sizeof(size_t) * (len + 1));
     for (size_t i = 0; i <= len; i++) {
         index = sufArr[i];
         if (index == len) {
-            originalLMSIndexes[savedNames] = index;
-            denseArr[savedNames++] = name;
+            originalLMSIndexes[savedNames++] = index;
             nameArr[index] = name++;
             continue;
         }
         if (typedOut[index] != S_TYPE || index == 0) continue;
         if (typedOut[index - 1] != L_TYPE) continue;
         if (lastLMSIndex == __SIZE_MAX__) {
-            originalLMSIndexes[savedNames] = index;
+            originalLMSIndexes[savedNames++] = index;
             nameArr[index] = name;
             lastLMSIndex = index;
-            savedNames++;
         } else {
             if (sizetCompareLmsSubstrings(input, typedOut, lastLMSIndex, index,
                                           len)) {
@@ -143,14 +135,24 @@ errors sizetFindSameSubstrings(size_t* input, size_t* sufArr, bool* typedOut,
             } else {
                 nameArr[index] = ++name;
             }
-            originalLMSIndexes[savedNames] = index;
-            denseArr[savedNames++] = name;
+            originalLMSIndexes[savedNames++] = index;
             lastLMSIndex = index;
         }
     }
 
     if (name + 1 < savedNames) {
         rec_sais_out recOut = {.size = savedNames};
+        size_t* denseArr = malloc(sizeof(size_t) * lmsArr->indexAmount);
+        if (!denseArr) {
+            free(nameArr);
+            return mallocErr;
+        }
+        size_t i = lmsArr->indexAmount;
+        size_t j = 0;
+
+        while((i--) > 0) {
+            denseArr[j++] = nameArr[lmsArr->array[i]];
+        }
         if (!(recOut.data = malloc(sizeof(size_t) * (savedNames + 1)))) {
             free(nameArr);
             free(denseArr);
@@ -164,12 +166,24 @@ errors sizetFindSameSubstrings(size_t* input, size_t* sufArr, bool* typedOut,
             free(originalLMSIndexes);
             return mallocErr;
         }
+
+        for(size_t i = 0; i < lmsArr->indexAmount; i++){
+            originalLMSIndexes[i++] = lmsArr->array[lmsArr->indexAmount - 1 - recOut.data[i]];
+        }
         free(recOut.data);
     }
+
+    *finalOrder = originalLMSIndexes;
     free(originalLMSIndexes);
-    free(denseArr);
     free(nameArr);
     return success;
+}
+
+void sizetFinalLMSFill(size_t* input, size_t* orderedLMSindexes, size_t indexAmount, size_t *ssEnd, size_t* sufArr) {
+    sufArr[0] = orderedLMSindexes[0];
+    for(size_t i = indexAmount - 1; i > 0; i--) {
+        sufArr[ssEnd[input[orderedLMSindexes[i]]]--] = orderedLMSindexes[i];
+    }
 }
 
 errors sizetSAIS(size_t* input, rec_sais_out* output, size_t alphabetSize) {
@@ -246,8 +260,8 @@ errors sizetSAIS(size_t* input, rec_sais_out* output, size_t alphabetSize) {
         free(suffixArr);
         return mallocErr;
     }
-
-    if (sizetFindSameSubstrings(input, suffixArr, typedOut, output->size) !=
+    size_t *finalOrderLMSindexes;
+    if (sizetFindSameSubstrings(input, suffixArr, typedOut, output->size, &LMSindexes, &finalOrderLMSindexes) !=
         success) {
         free(typedOut);
         free(charCounts);
@@ -257,7 +271,15 @@ errors sizetSAIS(size_t* input, rec_sais_out* output, size_t alphabetSize) {
         free(suffixArr);
         return mallocErr;
     }
+    
+    memset(suffixArr, -1, (output->size + 1) * sizeof(size_t));
+    memcpy(ssEndCopy, substringIndexes[END], sizeof(size_t) * alphabetSize);
+    sizetFinalLMSFill(input, finalOrderLMSindexes, LMSindexes.indexAmount, ssEndCopy, suffixArr);
 
+    sizetLinductionSort(suffixArr, substringIndexes, typedOut, input, output->size, alphabetSize);
+    sizetSinductionSort(suffixArr, substringIndexes, typedOut, input, output->size, alphabetSize);
+
+    memcpy(output->data, suffixArr, sizeof(size_t) * output->size);
     free(typedOut);
     free(charCounts);
     free(LMSindexes.array);
@@ -365,20 +387,14 @@ bool ucCompareLmsSubstrings(unsigned char* input, bool* typedIdx, size_t s1Idx,
 }
 
 errors ucFindSameSubstrings(unsigned char* input, size_t* sufArr,
-                            bool* typedOut, size_t len) {
+                            bool* typedOut, size_t len, LMSArray *lmsArr, size_t **finalOrder) {
     size_t index;
     size_t lastLMSIndex = __SIZE_MAX__;
     size_t name = 0;
     size_t* nameArr = malloc(sizeof(size_t) * (len + 1));
     if (!nameArr) return mallocErr;
-    size_t* denseArr = malloc(sizeof(size_t) * (len + 1));
-    if (!denseArr) {
-        free(nameArr);
-        return mallocErr;
-    }
     size_t* originalLMSIndexes = malloc(sizeof(size_t) * (len + 1));
     if(!originalLMSIndexes) {
-        free(denseArr);
         free(nameArr);
         return mallocErr;
     }
@@ -387,8 +403,7 @@ errors ucFindSameSubstrings(unsigned char* input, size_t* sufArr,
     for (size_t i = 0; i <= len; i++) {
         index = sufArr[i];
         if (index == len) {
-            originalLMSIndexes[nameAmount] = index;
-            denseArr[nameAmount++] = name;
+            originalLMSIndexes[nameAmount++] = index;
             nameArr[index] = name++;
             continue;
         }
@@ -396,8 +411,7 @@ errors ucFindSameSubstrings(unsigned char* input, size_t* sufArr,
         if (typedOut[index - 1] != L_TYPE) continue;
         if (lastLMSIndex == __SIZE_MAX__) {
             nameArr[index] = name;
-            originalLMSIndexes[nameAmount] = index;
-            denseArr[nameAmount++] = name;
+            originalLMSIndexes[nameAmount++] = index;
             lastLMSIndex = index;
         } else {
             if (ucCompareLmsSubstrings(input, typedOut, lastLMSIndex, index,
@@ -407,13 +421,23 @@ errors ucFindSameSubstrings(unsigned char* input, size_t* sufArr,
                 nameArr[index] = ++name;
             }
             lastLMSIndex = index;
-            originalLMSIndexes[nameAmount] = index;
-            denseArr[nameAmount++] = name;
+            originalLMSIndexes[nameAmount++] = index;
         }
     }
 
     if (name + 1 < nameAmount) {
-        rec_sais_out out = {.size = nameAmount - 1};
+        rec_sais_out out = {.size = nameAmount};
+        size_t* denseArr = malloc(sizeof(size_t) * (lmsArr->indexAmount));
+        if (!denseArr) {
+            free(nameArr);
+            return mallocErr; //add frees for other arrays
+        }
+        size_t j = lmsArr->indexAmount;
+        size_t i = 0;
+        while((j--) > 0) {
+            denseArr[i++] = nameArr[lmsArr->array[j]];
+        }
+
         if (!(out.data = malloc(sizeof(size_t) * nameAmount))) {
             free(denseArr);
             free(nameArr);
@@ -427,14 +451,24 @@ errors ucFindSameSubstrings(unsigned char* input, size_t* sufArr,
             free(originalLMSIndexes);
             return mallocErr;
         }
+
+        for(size_t i = 0; i < lmsArr->indexAmount; i++) {
+            originalLMSIndexes[i++] = lmsArr->array[lmsArr->indexAmount - 1 - out.data[j]];
+        }
         free(out.data);
     }
+
+    *finalOrder = originalLMSIndexes;
     
-    free(denseArr);
     free(nameArr);
-    free(originalLMSIndexes);
     return success;
-    // ADD RECURSION
+}
+
+void ucFinalLMSFill(unsigned char* input, size_t* orderedLMSindexes, size_t indexAmount, size_t *ssEnd, size_t* sufArr) {
+    sufArr[0] = orderedLMSindexes[0];
+    for(size_t i = indexAmount - 1; i > 0; i--) {
+        sufArr[ssEnd[input[orderedLMSindexes[i]]]--] = orderedLMSindexes[i];
+    }
 }
 
 errors ucSAIS(unsigned char* input, bwt_out* output) {
@@ -474,8 +508,9 @@ errors ucSAIS(unsigned char* input, bwt_out* output) {
                      output->size);
     ucSinductionSort(suffixArr, substringIndexes, typedOut, input,
                      output->size);
-
-    if (ucFindSameSubstrings(input, suffixArr, typedOut, output->size) !=
+    
+    size_t *finalOrderLMSindexes;
+    if (ucFindSameSubstrings(input, suffixArr, typedOut, output->size, &LMSindexes, &finalOrderLMSindexes) !=
         success) {
         free(typedOut);
         free(suffixArr);
@@ -483,6 +518,22 @@ errors ucSAIS(unsigned char* input, bwt_out* output) {
         return mallocErr;
     }
 
+    memset(suffixArr, -1, (output->size + 1) * sizeof(size_t));
+    memcpy(ssEndCopy, substringIndexes[END], sizeof(size_t) * AMOUNT_OF_VALUES);
+    ucFinalLMSFill(input, finalOrderLMSindexes, LMSindexes.indexAmount, ssEndCopy, suffixArr);
+
+    ucLinductionSort(suffixArr, substringIndexes, typedOut, input, output->size);
+    ucSinductionSort(suffixArr, substringIndexes, typedOut, input, output->size);
+
+    for(size_t i = 1; i < output->size; i++) {
+        if(suffixArr[i] == 0) {
+            output->data[i] = input[output->size - 1];
+            output->initialIndex = i;
+        }
+        else {
+            output->data[i] = input[suffixArr[i] - 1];
+        }
+    }
     free(typedOut);
     free(suffixArr);
     free(LMSindexes.array);
