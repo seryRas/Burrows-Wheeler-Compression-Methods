@@ -8,13 +8,13 @@
 #define BEGIN 0
 #define END 1
 #define AMOUNT_OF_VALUES 0x100
+#define ALL_SAME_INPUT 3
 typedef enum {
     success = 0,
     mallocErr,
     emptyInput,
     fileErr,
     generalError,
-
 } errors;
 
 typedef struct {
