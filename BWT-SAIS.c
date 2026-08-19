@@ -117,7 +117,6 @@ errors sizetFindSameSubstrings(size_t* input, size_t* sufArr, bool* typedOut,
         free(nameArr);
         return mallocErr;
     }
-    memset(nameArr, -1, sizeof(size_t) * (len + 1));
     for (size_t i = 0; i <= len; i++) {
         index = sufArr[i];
         if (index == len) {
@@ -145,25 +144,18 @@ errors sizetFindSameSubstrings(size_t* input, size_t* sufArr, bool* typedOut,
 
     if (name + 1 < savedNames) {
         rec_sais_out recOut = {.size = savedNames};
-        size_t* denseArr = malloc(sizeof(size_t) * lmsArr->indexAmount);
-        if (!denseArr) {
-            free(nameArr);
-            return mallocErr;
-        }
         size_t i = lmsArr->indexAmount;
         size_t j = 0;
 
         while ((i--) > 0) {
-            denseArr[j++] = nameArr[lmsArr->array[i]];
+            originalLMSIndexes[j++] = nameArr[lmsArr->array[i]];
         }
-        if (!(recOut.data = malloc(sizeof(size_t) * (savedNames + 1)))) {
+        if (!(recOut.data = malloc(sizeof(size_t) * savedNames))) {
             free(nameArr);
-            free(denseArr);
             free(originalLMSIndexes);
             return mallocErr;
         }
-        if (sizetSAIS(denseArr, &recOut, name + 1) != success) {
-            free(denseArr);
+        if (sizetSAIS(originalLMSIndexes, &recOut, name + 1) != success) {
             free(nameArr);
             free(recOut.data);
             free(originalLMSIndexes);
@@ -259,9 +251,10 @@ errors sizetSAIS(size_t* input, rec_sais_out* output, size_t alphabetSize) {
         free(typedOut);
         free(charCounts);
         free(LMSindexes.array);
+        free(suffixArr);
         free(substringIndexes[BEGIN]);
         free(substringIndexes[END]);
-        free(suffixArr);
+        free(ssEndCopy);
         return mallocErr;
     }
     size_t* finalOrderLMSindexes;
@@ -271,9 +264,10 @@ errors sizetSAIS(size_t* input, rec_sais_out* output, size_t alphabetSize) {
         free(typedOut);
         free(charCounts);
         free(LMSindexes.array);
+        free(suffixArr);
         free(substringIndexes[BEGIN]);
         free(substringIndexes[END]);
-        free(suffixArr);
+        free(ssEndCopy);
         return mallocErr;
     }
 
@@ -291,10 +285,11 @@ errors sizetSAIS(size_t* input, rec_sais_out* output, size_t alphabetSize) {
     free(typedOut);
     free(charCounts);
     free(LMSindexes.array);
+    free(suffixArr);
     free(substringIndexes[BEGIN]);
     free(substringIndexes[END]);
-    free(suffixArr);
     free(ssEndCopy);
+    free(finalOrderLMSindexes);
 
     return success;
 }
@@ -304,8 +299,7 @@ errors sizetSAIS(size_t* input, rec_sais_out* output, size_t alphabetSize) {
 // counts amount of times there is value (charCountArr[i] = amount of ASCII[i])
 // makes array of LMS indexes (LMSindexes->indexAmount - number of indexes)
 int ucSortTypes(size_t inputSize, unsigned char* input, bool* typedOutput,
-                 size_t* charCountArr, LMSArray* LMSindexes) {
-
+                size_t* charCountArr, LMSArray* LMSindexes) {
     typedOutput[inputSize - 1] = L_TYPE;
     charCountArr[input[inputSize - 1]]++;
     LMSindexes->array[LMSindexes->indexAmount++] = inputSize;
@@ -322,7 +316,7 @@ int ucSortTypes(size_t inputSize, unsigned char* input, bool* typedOutput,
             LMSindexes->array[LMSindexes->indexAmount++] = i + 1;
         }
 
-         if((++charCountArr[input[i]]) == inputSize) return ALL_SAME_INPUT;
+        if ((++charCountArr[input[i]]) == inputSize) return ALL_SAME_INPUT;
     }
     return EXIT_SUCCESS;
 }
@@ -407,7 +401,6 @@ errors ucFindSameSubstrings(unsigned char* input, size_t* sufArr,
         free(nameArr);
         return mallocErr;
     }
-    memset(nameArr, -1, sizeof(size_t) * (len + 1));
     size_t nameAmount = 0;
     for (size_t i = 0; i <= len; i++) {
         index = sufArr[i];
@@ -465,6 +458,7 @@ errors ucFindSameSubstrings(unsigned char* input, size_t* sufArr,
             originalLMSIndexes[i] =
                 lmsArr->array[lmsArr->indexAmount - 1 - out.data[i]];
         }
+        free(denseArr);
         free(out.data);
     }
 
@@ -483,7 +477,7 @@ void ucFinalLMSFill(unsigned char* input, size_t* orderedLMSindexes,
 }
 
 errors bwtTransform(unsigned char* input, bwt_out* output) {
-    if(output->size == 0) return emptyInput;
+    if (output->size == 0) return emptyInput;
     bool* typedOut = malloc(sizeof(bool) * (output->size + 1));
     if (!typedOut) return mallocErr;
 
@@ -495,9 +489,12 @@ errors bwtTransform(unsigned char* input, bwt_out* output) {
         return mallocErr;
     }
 
-    if(ucSortTypes(output->size, input, typedOut, charCounts, &LMSindexes) == ALL_SAME_INPUT) {
+    if (ucSortTypes(output->size, input, typedOut, charCounts, &LMSindexes) ==
+        ALL_SAME_INPUT) {
         memcpy(output->data, input, output->size);
         output->initialIndex = 0;
+        free(typedOut);
+        free(LMSindexes.array);
         return success;
     }
 
@@ -544,6 +541,7 @@ errors bwtTransform(unsigned char* input, bwt_out* output) {
                      output->size);
     ucSinductionSort(suffixArr, substringIndexes, typedOut, input,
                      output->size);
+    free(finalOrderLMSindexes);
 
     for (size_t i = 1; i <= output->size; i++) {
         if (suffixArr[i] == 0) {
@@ -557,5 +555,66 @@ errors bwtTransform(unsigned char* input, bwt_out* output) {
     free(typedOut);
     free(suffixArr);
     free(LMSindexes.array);
+    return success;
+}
+
+static void sortTable(unsigned char* input, size_t endInArr, size_t startInArr,
+                      size_t* current, size_t* swap, size_t j, size_t inputSize,
+                      bool simple) {
+    size_t count[0x100] = {0};
+    size_t valueBegin[0x100] = {0};
+    size_t currentValueEnd[0x100] = {0};
+
+    for (size_t i = startInArr; i < endInArr; i++) {
+        count[input[(current[i] + j) % inputSize]]++;
+    }
+    size_t currentIndex = 0;
+    for (int i = 0; i < 0x100; i++) {
+        if (count[i] > 0) {
+            if (count[i] == inputSize) return;
+            valueBegin[i] = currentIndex + startInArr;
+            currentValueEnd[i] = currentIndex + startInArr;
+            currentIndex += count[i];
+        }
+    }
+
+    for (size_t i = startInArr; i < endInArr; i++) {
+        swap[currentValueEnd[input[(current[i] + j) % inputSize]]++] =
+            current[i];
+    }
+    memcpy(current + startInArr, swap + startInArr,
+           sizeof(size_t) * (endInArr - startInArr));
+
+    if (simple) return;
+
+    for (int i = 0; i < 0x100; i++) {
+        if (count[i] > 1) {
+            sortTable(input, currentValueEnd[i], valueBegin[i], current, swap,
+                      j + 1, inputSize, false);
+        }
+    }
+}
+
+errors bwtRetransform(bwt_out* input, unsigned char* output) {
+    if (input->size == 0) return emptyInput;
+    size_t* sortedIndexes = malloc(sizeof(size_t) * input->size);
+    if (sortedIndexes == NULL) return mallocErr;
+    size_t* helperArr = malloc(sizeof(size_t) * input->size);
+    if (helperArr == NULL) {
+        free(sortedIndexes);
+        return mallocErr;
+    }
+
+    for (size_t i = 0; i < input->size; i++) sortedIndexes[i] = i;
+    sortTable(input->data, input->size, 0, sortedIndexes, helperArr, 0,
+              input->size, true);
+    free(helperArr);
+
+    size_t dataIndex = input->initialIndex;
+    for (size_t i = 0; i < input->size; i++) {
+        output[i] = input->data[sortedIndexes[dataIndex]];
+        dataIndex = sortedIndexes[dataIndex];
+    }
+    free(sortedIndexes);
     return success;
 }
