@@ -1,6 +1,15 @@
 #include <time.h>
+#include <sys/resource.h>
 
 #include "BWT.h"
+
+void print_peak_memory(void) {
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+    // ru_maxrss is in Kilobytes on Linux
+    printf("Peak RAM usage: %ld KB (%.2f MB)\n", 
+           usage.ru_maxrss, usage.ru_maxrss / 1024.0);
+}
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -14,7 +23,7 @@ int main(int argc, char** argv) {
     }
 
     fseek(testInput, 0, SEEK_END);
-    size_t fileSize = ftell(testInput);
+    __uint32_t fileSize = ftell(testInput);
     rewind(testInput);
 
     unsigned char* arr = malloc(fileSize + 1);
@@ -27,13 +36,17 @@ int main(int argc, char** argv) {
     fread(arr, 1, fileSize, testInput);
     arr[fileSize] = '\0';
 
-    bwt_out out = {.size = fileSize};
-    if ((out.data = malloc(fileSize + 1)) == NULL) return mallocErr;
-    out.data[fileSize] = '\0';
+    unsigned char* packed = malloc(fileSize + BWT_HEADER_SIZE);
+    if (!packed) {
+        free(arr);
+        fclose(testInput);
+        fprintf(stderr, "malloc failed\n");
+        return mallocErr;
+    }
 
     unsigned char* restored = malloc(fileSize + 1);
     if (!restored) {
-        free(out.data);
+        free(packed);
         fclose(testInput);
         fprintf(stderr, "malloc failed\n");
         return mallocErr;
@@ -41,9 +54,9 @@ int main(int argc, char** argv) {
     restored[fileSize] = '\0';
 
     clock_t startTime = clock();
-    if (bwtTransform((unsigned char*)arr, &out) != success) {
+    if (bwtTransform((unsigned char*)arr, fileSize, packed) != success) {
         free(restored);
-        free(out.data);
+        free(packed);
         free(arr);
         fclose(testInput);
         return generalError;
@@ -53,9 +66,9 @@ int main(int argc, char** argv) {
         ((double)(endTime - startTime) / CLOCKS_PER_SEC) * 1000;
 
     startTime = clock();
-    if (bwtRetransform(&out, restored) != success) {
+    if (bwtRetransform(packed, fileSize, restored) != success) {
         free(restored);
-        free(out.data);
+        free(packed);
         free(arr);
         fclose(testInput);
         return generalError;
@@ -68,8 +81,9 @@ int main(int argc, char** argv) {
     fprintf(stdout, "Retransform time: %f ms\n", retransformMs);
 
     free(restored);
-    free(out.data);
+    free(packed);
     free(arr);
     fclose(testInput);
+    print_peak_memory();
     return success;
 }

@@ -36,63 +36,71 @@ typedef struct {
 } roundTripCase;
 
 testResult runTransformationCase(transformationCase testCase) {
-    bwt_out result = {.size = testCase.inputSize};
-    if ((result.data = malloc(testCase.inputSize + 1)) == NULL) return error;
-    result.data[testCase.inputSize] = '\0';
+    unsigned char* result = malloc(testCase.inputSize + BWT_HEADER_SIZE);
+    if (result == NULL) return error;
 
-    if (bwtTransform(testCase.input, &result) != success) {
-        free(result.data);
+    if (bwtTransform(testCase.input, testCase.inputSize, result) != success) {
+        free(result);
         return error;
     }
 
-    if (memcmp(testCase.expectedResult, result.data, testCase.inputSize) != 0) {
+    if (memcmp(testCase.expectedResult, result + BWT_HEADER_SIZE,
+               testCase.inputSize) != 0) {
         fprintf(stdout, "FAIL: %s, expected: %s, received: %s\n", testCase.name,
-                testCase.expectedResult, result.data);
-        free(result.data);
+                testCase.expectedResult, result + BWT_HEADER_SIZE);
+        free(result);
         return fail;
     }
 
-    if (result.initialIndex != testCase.expectedIndex) {
+    size_t initialIndex = 0;
+    memcpy(&initialIndex, result + 1, sizeof(size_t));
+    if (initialIndex != testCase.expectedIndex) {
         fprintf(stdout, "FAIL: %s, expected index: %lu, received: %lu\n",
-                testCase.name, testCase.expectedIndex, result.initialIndex);
-        free(result.data);
+                testCase.name, testCase.expectedIndex, initialIndex);
+        free(result);
         return fail;
     }
 
     fprintf(stdout, "PASS: %s\n", testCase.name);
-    free(result.data);
+    free(result);
     return pass;
 }
 
 testResult runErrorCase(errorCase testCase) {
-    bwt_out result = {.size = testCase.inputSize};
-    result.data = malloc(testCase.inputSize + 1);
-    if (testCase.inputSize > 0 && result.data == NULL) return error;
+    unsigned char* result = malloc(testCase.inputSize + BWT_HEADER_SIZE);
+    if (testCase.inputSize > 0 && result == NULL) return error;
 
-    if (bwtTransform(testCase.input, &result) != testCase.expectedReturn) {
+    if (bwtTransform(testCase.input, testCase.inputSize, result) !=
+        testCase.expectedReturn) {
         fprintf(stdout, "FAIL: %s, expected return code: %i\n", testCase.name,
                 testCase.expectedReturn);
-        free(result.data);
+        free(result);
         return fail;
     }
 
     fprintf(stdout, "PASS: %s\n", testCase.name);
-    free(result.data);
+    free(result);
     return pass;
 }
 
 testResult runRetransformCase(retransformCase testCase) {
-    bwt_out transformed = {
-        .data = testCase.transformed,
-        .size = testCase.inputSize,
-        .initialIndex = testCase.initialIndex,
-    };
+    unsigned char* transformed = malloc(testCase.inputSize + BWT_HEADER_SIZE);
+    if (transformed == NULL) return error;
+    transformed[0] = BWT_METHOD_SAIS;
+    memcpy(transformed + 1, &testCase.initialIndex, sizeof(size_t));
+    memcpy(transformed + BWT_HEADER_SIZE, testCase.transformed,
+           testCase.inputSize);
     unsigned char* output = malloc(testCase.inputSize + 1);
-    if (output == NULL) return error;
+    if (output == NULL) {
+        free(transformed);
+        return error;
+    }
     output[testCase.inputSize] = '\0';
 
-    if (bwtRetransform(&transformed, output) != success) {
+    if (bwtRetransform(transformed, testCase.inputSize + BWT_HEADER_SIZE,
+                       output) != success) {
         free(output);
+        free(transformed);
         return error;
     }
 
@@ -100,35 +108,37 @@ testResult runRetransformCase(retransformCase testCase) {
         fprintf(stdout, "FAIL: %s, expected: %s, received: %s\n", testCase.name,
                 testCase.expectedOutput, output);
         free(output);
+        free(transformed);
         return fail;
     }
 
     fprintf(stdout, "PASS: %s\n", testCase.name);
     free(output);
+    free(transformed);
     return pass;
 }
 
 testResult runRoundTripCase(roundTripCase testCase) {
-    bwt_out transformed = {.size = testCase.inputSize};
-    transformed.data = malloc(testCase.inputSize + 1);
-    if (transformed.data == NULL) return error;
-    transformed.data[testCase.inputSize] = '\0';
+    unsigned char* transformed = malloc(testCase.inputSize + BWT_HEADER_SIZE);
+    if (transformed == NULL) return error;
 
-    if (bwtTransform(testCase.input, &transformed) != success) {
-        free(transformed.data);
+    if (bwtTransform(testCase.input, testCase.inputSize, transformed) !=
+        success) {
+        free(transformed);
         return error;
     }
 
     unsigned char* output = malloc(testCase.inputSize + 1);
     if (output == NULL) {
-        free(transformed.data);
+        free(transformed);
         return error;
     }
     output[testCase.inputSize] = '\0';
 
-    if (bwtRetransform(&transformed, output) != success) {
+    if (bwtRetransform(transformed, testCase.inputSize + BWT_HEADER_SIZE,
+                       output) != success) {
         free(output);
-        free(transformed.data);
+        free(transformed);
         return error;
     }
 
@@ -136,32 +146,35 @@ testResult runRoundTripCase(roundTripCase testCase) {
         fprintf(stdout, "FAIL: %s, expected: %s, received: %s\n", testCase.name,
                 testCase.input, output);
         free(output);
-        free(transformed.data);
+        free(transformed);
         return fail;
     }
 
     fprintf(stdout, "PASS: %s\n", testCase.name);
     free(output);
-    free(transformed.data);
+    free(transformed);
     return pass;
 }
 
 testResult runRetransformErrorCase(errorCase testCase) {
-    bwt_out transformed = {
-        .data = testCase.input,
-        .size = testCase.inputSize,
-        .initialIndex = 0,
-    };
+    unsigned char* transformed = malloc(testCase.inputSize + BWT_HEADER_SIZE);
+    if (testCase.inputSize > 0 && transformed == NULL) return error;
+    transformed[0] = BWT_METHOD_SAIS;
+    memset(transformed + 1, 0, sizeof(size_t));
+    memcpy(transformed + BWT_HEADER_SIZE, testCase.input, testCase.inputSize);
     unsigned char outputPlaceholder[1] = {0};
 
-    if (bwtRetransform(&transformed, outputPlaceholder) !=
+    if (bwtRetransform(transformed, testCase.inputSize + BWT_HEADER_SIZE,
+                       outputPlaceholder) !=
         testCase.expectedReturn) {
         fprintf(stdout, "FAIL: %s, expected return code: %i\n", testCase.name,
                 testCase.expectedReturn);
+        free(transformed);
         return fail;
     }
 
     fprintf(stdout, "PASS: %s\n", testCase.name);
+    free(transformed);
     return pass;
 }
 

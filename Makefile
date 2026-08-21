@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -O2 -Wall -Wextra -g
+CFLAGS = -O3 -march=native -Wall -Wextra -g
 TARGET = bwt
 RADIX_TARGET = bwt-radix
 TEST_TARGET = bwt-test

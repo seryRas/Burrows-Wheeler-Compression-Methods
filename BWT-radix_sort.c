@@ -37,47 +37,58 @@ void sortTable(unsigned char* input, size_t endInArr, size_t startInArr,
     }
 }
 
-errors bwtTransform(unsigned char* input, bwt_out* output) {
-    if (output->size == 0) return emptyInput;
-    size_t* sortedIndexes = malloc(sizeof(size_t) * output->size);
+errors bwtTransform(unsigned char* input, size_t inputSize,
+                    unsigned char* output) {
+    if (inputSize == 0) return emptyInput;
+    size_t* sortedIndexes = malloc(sizeof(size_t) * inputSize);
     if (sortedIndexes == NULL) return mallocErr;
-    size_t* helperArr = malloc(sizeof(size_t) * output->size);
+    size_t* helperArr = malloc(sizeof(size_t) * inputSize);
     if (helperArr == NULL) {
         free(sortedIndexes);
         return mallocErr;
     }
 
-    for (size_t i = 0; i < output->size; i++) sortedIndexes[i] = i;
-    sortTable(input, output->size, 0, sortedIndexes, helperArr, 0, output->size,
+    for (size_t i = 0; i < inputSize; i++) sortedIndexes[i] = i;
+    sortTable(input, inputSize, 0, sortedIndexes, helperArr, 0, inputSize,
               false);
     free(helperArr);
-    for (size_t i = 0; i < output->size; i++) {
-        output->data[i] =
-            input[(sortedIndexes[i] + output->size - 1) % output->size];
-        if (sortedIndexes[i] == 0) output->initialIndex = i;
+
+    size_t initialIndex = 0;
+    unsigned char* packedData = output + BWT_HEADER_SIZE;
+    for (size_t i = 0; i < inputSize; i++) {
+        packedData[i] = input[(sortedIndexes[i] + inputSize - 1) % inputSize];
+        if (sortedIndexes[i] == 0) initialIndex = i;
     }
+    memcpy(output + 1, &initialIndex, sizeof(size_t));
     free(sortedIndexes);
     return success;
 }
 
-errors bwtRetransform(bwt_out* input, unsigned char* output) {
-    if (input->size == 0) return emptyInput;
-    size_t* sortedIndexes = malloc(sizeof(size_t) * input->size);
+errors bwtRetransform(unsigned char* input, size_t inputSize,
+                      unsigned char* output) {
+    if (inputSize == 0) return emptyInput;
+
+    size_t payloadSize = inputSize;
+    size_t initialIndex = 0;
+    memcpy(&initialIndex, input + 1, sizeof(size_t));
+    unsigned char* transformed = input + BWT_HEADER_SIZE;
+
+    size_t* sortedIndexes = malloc(sizeof(size_t) * payloadSize);
     if (sortedIndexes == NULL) return mallocErr;
-    size_t* helperArr = malloc(sizeof(size_t) * input->size);
+    size_t* helperArr = malloc(sizeof(size_t) * payloadSize);
     if (helperArr == NULL) {
         free(sortedIndexes);
         return mallocErr;
     }
 
-    for (size_t i = 0; i < input->size; i++) sortedIndexes[i] = i;
-    sortTable(input->data, input->size, 0, sortedIndexes, helperArr, 0,
-              input->size, true);
+    for (size_t i = 0; i < payloadSize; i++) sortedIndexes[i] = i;
+    sortTable(transformed, payloadSize, 0, sortedIndexes, helperArr, 0,
+              payloadSize, true);
     free(helperArr);
 
-    size_t dataIndex = input->initialIndex;
-    for (size_t i = 0; i < input->size; i++) {
-        output[i] = input->data[sortedIndexes[dataIndex]];
+    size_t dataIndex = initialIndex;
+    for (size_t i = 0; i < payloadSize; i++) {
+        output[i] = transformed[sortedIndexes[dataIndex]];
         dataIndex = sortedIndexes[dataIndex];
     }
     return success;
