@@ -9,30 +9,30 @@ typedef enum {
 typedef struct {
     const char* name;
     unsigned char* input;
-    size_t inputSize;
+    unsigned int inputSize;
     unsigned char* expectedResult;
-    size_t expectedIndex;
+    unsigned int expectedIndex;
 } transformationCase;
 
 typedef struct {
     const char* name;
     unsigned char* input;
-    size_t inputSize;
+    unsigned int inputSize;
     errors expectedReturn;
 } errorCase;
 
 typedef struct {
     const char* name;
     unsigned char* transformed;
-    size_t inputSize;
-    size_t initialIndex;
+    unsigned int inputSize;
+    unsigned int initialIndex;
     unsigned char* expectedOutput;
 } retransformCase;
 
 typedef struct {
     const char* name;
     unsigned char* input;
-    size_t inputSize;
+    unsigned int inputSize;
 } roundTripCase;
 
 testResult runTransformationCase(transformationCase testCase) {
@@ -52,10 +52,10 @@ testResult runTransformationCase(transformationCase testCase) {
         return fail;
     }
 
-    size_t initialIndex = 0;
-    memcpy(&initialIndex, result + 1, sizeof(size_t));
+    unsigned int initialIndex = 0;
+    memcpy(&initialIndex, result + 1, sizeof(unsigned int));
     if (initialIndex != testCase.expectedIndex) {
-        fprintf(stdout, "FAIL: %s, expected index: %lu, received: %lu\n",
+        fprintf(stdout, "FAIL: %s, expected index: %u, received: %u\n",
                 testCase.name, testCase.expectedIndex, initialIndex);
         free(result);
         return fail;
@@ -86,8 +86,8 @@ testResult runErrorCase(errorCase testCase) {
 testResult runRetransformCase(retransformCase testCase) {
     unsigned char* transformed = malloc(testCase.inputSize + BWT_HEADER_SIZE);
     if (transformed == NULL) return error;
-    transformed[0] = BWT_METHOD_SAIS;
-    memcpy(transformed + 1, &testCase.initialIndex, sizeof(size_t));
+    transformed[0] = 0;
+    memcpy(transformed + 1, &testCase.initialIndex, sizeof(unsigned int));
     memcpy(transformed + BWT_HEADER_SIZE, testCase.transformed,
            testCase.inputSize);
     unsigned char* output = malloc(testCase.inputSize + 1);
@@ -97,8 +97,7 @@ testResult runRetransformCase(retransformCase testCase) {
     }
     output[testCase.inputSize] = '\0';
 
-    if (bwtRetransform(transformed, testCase.inputSize + BWT_HEADER_SIZE,
-                       output) != success) {
+    if (bwtRetransform(transformed, testCase.inputSize, output) != success) {
         free(output);
         free(transformed);
         return error;
@@ -135,8 +134,7 @@ testResult runRoundTripCase(roundTripCase testCase) {
     }
     output[testCase.inputSize] = '\0';
 
-    if (bwtRetransform(transformed, testCase.inputSize + BWT_HEADER_SIZE,
-                       output) != success) {
+    if (bwtRetransform(transformed, testCase.inputSize, output) != success) {
         free(output);
         free(transformed);
         return error;
@@ -159,13 +157,12 @@ testResult runRoundTripCase(roundTripCase testCase) {
 testResult runRetransformErrorCase(errorCase testCase) {
     unsigned char* transformed = malloc(testCase.inputSize + BWT_HEADER_SIZE);
     if (testCase.inputSize > 0 && transformed == NULL) return error;
-    transformed[0] = BWT_METHOD_SAIS;
-    memset(transformed + 1, 0, sizeof(size_t));
+    transformed[0] = 0;
+    memset(transformed + 1, 0, sizeof(unsigned int));
     memcpy(transformed + BWT_HEADER_SIZE, testCase.input, testCase.inputSize);
     unsigned char outputPlaceholder[1] = {0};
 
-    if (bwtRetransform(transformed, testCase.inputSize + BWT_HEADER_SIZE,
-                       outputPlaceholder) !=
+    if (bwtRetransform(transformed, testCase.inputSize, outputPlaceholder) !=
         testCase.expectedReturn) {
         fprintf(stdout, "FAIL: %s, expected return code: %i\n", testCase.name,
                 testCase.expectedReturn);
@@ -179,14 +176,14 @@ testResult runRetransformErrorCase(errorCase testCase) {
 }
 
 testResult transformationTest() {
-    unsigned char word[] = "data";
-    unsigned char expectedResult[] = "tdaa";
+    unsigned char word[] = "test";
+    unsigned char expectedResult[] = "ttes";
     transformationCase testCase = {
         .name = "Transformation test",
         .input = word,
         .inputSize = sizeof(word) - 1,
         .expectedResult = expectedResult,
-        .expectedIndex = 2,
+        .expectedIndex = 4,
     };
 
     return runTransformationCase(testCase);
@@ -200,7 +197,7 @@ testResult singleCharacterTest() {
         .input = word,
         .inputSize = sizeof(word) - 1,
         .expectedResult = expectedResult,
-        .expectedIndex = 0,
+        .expectedIndex = 1,
     };
 
     return runTransformationCase(testCase);
@@ -214,7 +211,7 @@ testResult twoCharacterTest() {
         .input = word,
         .inputSize = sizeof(word) - 1,
         .expectedResult = expectedResult,
-        .expectedIndex = 0,
+        .expectedIndex = 1,
     };
 
     return runTransformationCase(testCase);
@@ -222,13 +219,13 @@ testResult twoCharacterTest() {
 
 testResult repeatedCharacterMixTest() {
     unsigned char word[] = "aaba";
-    unsigned char expectedResult[] = "baaa";
+    unsigned char expectedResult[] = "abaa";
     transformationCase testCase = {
         .name = "Repeated character mix test",
         .input = word,
         .inputSize = sizeof(word) - 1,
         .expectedResult = expectedResult,
-        .expectedIndex = 1,
+        .expectedIndex = 2,
     };
 
     return runTransformationCase(testCase);
@@ -236,13 +233,13 @@ testResult repeatedCharacterMixTest() {
 
 testResult punctuationAndSpaceTest() {
     unsigned char word[] = "a a!";
-    unsigned char expectedResult[] = "aa! ";
+    unsigned char expectedResult[] = "!aa ";
     transformationCase testCase = {
         .name = "Punctuation and space test",
         .input = word,
         .inputSize = sizeof(word) - 1,
         .expectedResult = expectedResult,
-        .expectedIndex = 2,
+        .expectedIndex = 3,
     };
 
     return runTransformationCase(testCase);
@@ -275,13 +272,13 @@ testResult allSameCharactersTest() {
 }
 
 testResult retransformKnownCaseTest() {
-    unsigned char transformed[] = "tdaa";
+    unsigned char transformed[] = "atda";
     unsigned char expectedOutput[] = "data";
     retransformCase testCase = {
         .name = "Retransform known case test",
         .transformed = transformed,
         .inputSize = sizeof(transformed) - 1,
-        .initialIndex = 2,
+        .initialIndex = 3,
         .expectedOutput = expectedOutput,
     };
 
@@ -346,7 +343,6 @@ testResult roundTripAllSameTest() {
 
     return runRoundTripCase(testCase);
 }
-
 int main() {
     int counter[3] = {0};
     counter[transformationTest()]++;
