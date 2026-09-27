@@ -12,7 +12,7 @@
 #define BWT_HEADER_SIZE (1 + sizeof(unsigned int))
 #define ALL_SAME_INPUT 3
 #define EMPTY_IDX UINT_MAX
-#define MAX_CHUNK 921600//4194304 // 4MB
+#define MAX_CHUNK 921600// 900kb//4194304 // 4MB
 typedef enum {
     success = 0,
     mallocErr,

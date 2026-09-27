@@ -12,6 +12,7 @@ void print_peak_memory(void) {
     printf("Peak RAM usage: %ld KB (%.2f MB)\n", 
            usage.ru_maxrss, usage.ru_maxrss / 1024.0);
 }
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <file_path>\n", argv[0]);
@@ -53,10 +54,9 @@ int main(int argc, char** argv) {
         return emptyInput;
     }
 
-    // Calculate how many chunks we need to process
+    // Calculate total headers needed for internal chunking
     unsigned int numChunks = (fileSize + MAX_CHUNK - 1) / MAX_CHUNK;
     
-    // Each chunk requires its own BWT header size
     unsigned char* packed = malloc(fileSize + (numChunks * BWT_HEADER_SIZE) + 1);
     if (!packed) {
         free(arr);
@@ -71,46 +71,34 @@ int main(int argc, char** argv) {
     }
     restored[fileSize] = '\0';
 
-    double totalTransformMs = 0.0;
-    double totalRetransformMs = 0.0;
-
-    for (unsigned int offset = 0, chunkIdx = 0; offset < fileSize; offset += MAX_CHUNK, chunkIdx++) {
-        unsigned int currentChunkSize = fileSize - offset;
-        if (currentChunkSize > MAX_CHUNK) {
-            currentChunkSize = MAX_CHUNK;
-        }
-
-        unsigned char* currentArr = arr + offset;
-        unsigned char* currentPacked = packed + offset + (chunkIdx * BWT_HEADER_SIZE);
-        unsigned char* currentRestored = restored + offset;
-
-        clock_t startTime = clock();
-        if (bwtTransform(currentArr, currentChunkSize, currentPacked) != success) {
-            fprintf(stderr, "Transform failed on chunk %u\n", chunkIdx);
-            free(restored);
-            free(packed);
-            free(arr);
-            return generalError;
-        }
-        clock_t endTime = clock();
-        totalTransformMs += ((double)(endTime - startTime) / CLOCKS_PER_SEC) * 1000;
-
-        startTime = clock();
-        if (bwtRetransform(currentPacked, currentChunkSize, currentRestored) != success) {
-            fprintf(stderr, "Retransform failed on chunk %u\n", chunkIdx);
-            free(restored);
-            free(packed);
-            free(arr);
-            return generalError;
-        }
-        endTime = clock();
-        totalRetransformMs += ((double)(endTime - startTime) / CLOCKS_PER_SEC) * 1000;
+    // Single top-level call for Transformation
+    clock_t startTime = clock();
+    if (bwtTransform(arr, fileSize, packed) != success) {
+        fprintf(stderr, "Transform failed\n");
+        free(restored);
+        free(packed);
+        free(arr);
+        return generalError;
     }
+    clock_t endTime = clock();
+    double transformMs = ((double)(endTime - startTime) / CLOCKS_PER_SEC) * 1000;
 
-    fprintf(stdout, "Total Transform time: %f ms\n", totalTransformMs);
-    fprintf(stdout, "Total Retransform time: %f ms\n", totalRetransformMs);
+    // Single top-level call for Retransformation
+    startTime = clock();
+    if (bwtRetransform(packed, fileSize, restored) != success) {
+        fprintf(stderr, "Retransform failed\n");
+        free(restored);
+        free(packed);
+        free(arr);
+        return generalError;
+    }
+    endTime = clock();
+    double retransformMs = ((double)(endTime - startTime) / CLOCKS_PER_SEC) * 1000;
 
-    // Using memcmp is safer for binary/chunked data than strcmp
+    fprintf(stdout, "Total Transform time: %f ms\n", transformMs);
+    fprintf(stdout, "Total Retransform time: %f ms\n", retransformMs);
+
+    // Verify entire payload
     if (memcmp(restored, arr, fileSize) != 0) {
         fprintf(stderr, "FAIL: Restored data does not match original.\n");
     } else {

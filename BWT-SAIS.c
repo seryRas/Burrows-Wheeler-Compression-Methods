@@ -1,10 +1,12 @@
 #include "BWT.h"
 
-errors sizetSAIS(unsigned int* input, rec_sais_out* output, unsigned int alphabetSize);
+errors sizetSAIS(unsigned int* input, rec_sais_out* output,
+                 unsigned int alphabetSize);
 
 #define BITVECTOR_BYTE_COUNT(bitCount) (((bitCount) + 7) / 8)
 
-static inline bool bitvectorGet(const unsigned char* bitvector, unsigned int index) {
+static inline bool bitvectorGet(const unsigned char* bitvector,
+                                unsigned int index) {
     return (bitvector[index / 8] >> (index % 8)) & 1u;
 }
 
@@ -18,7 +20,9 @@ static inline void bitvectorSet(unsigned char* bitvector, unsigned int index,
     }
 }
 
-static inline void fillSubstringIndexes(unsigned int* arr[2], unsigned int* counts, unsigned int alphabetSize) {
+static inline void fillSubstringIndexes(unsigned int* arr[2],
+                                        unsigned int* counts,
+                                        unsigned int alphabetSize) {
     unsigned int count = 1;
     for (unsigned int i = 0; i < alphabetSize; i++) {
         arr[BEGIN][i] = count;
@@ -27,8 +31,9 @@ static inline void fillSubstringIndexes(unsigned int* arr[2], unsigned int* coun
     }
 }
 
-void sizetSortTypes(unsigned int inputSize, unsigned int* input, unsigned char* typedOutput,
-                    unsigned int* charCountArr, LMSArray* LMSindexes) {
+void sizetSortTypes(unsigned int inputSize, unsigned int* input,
+                    unsigned char* typedOutput, unsigned int* charCountArr,
+                    LMSArray* LMSindexes) {
     if (inputSize == 0) return;
 
     bitvectorSet(typedOutput, inputSize - 1, L_TYPE);
@@ -52,17 +57,19 @@ void sizetSortTypes(unsigned int inputSize, unsigned int* input, unsigned char* 
     }
 }
 
-static inline void sizetFillLMS(LMSArray* indexes, unsigned int* substringI, unsigned int* suffArr,
-                  unsigned int inputSize, unsigned int* input) {
+static inline void sizetFillLMS(LMSArray* indexes, unsigned int* substringI,
+                                unsigned int* suffArr, unsigned int inputSize,
+                                unsigned int* input) {
     suffArr[0] = inputSize;
     for (unsigned int i = 1; i < indexes->indexAmount; i++) {
         suffArr[substringI[input[indexes->array[i]]]--] = indexes->array[i];
     }
 }
 
-errors sizetLinductionSort(unsigned int* suffixArray, unsigned int* subIndexes[2],
-                           unsigned char* typedIdx, unsigned int* input,
-                           unsigned int inputSize, unsigned int alphabetSize) {
+errors sizetLinductionSort(unsigned int* suffixArray,
+                           unsigned int* subIndexes[2], unsigned char* typedIdx,
+                           unsigned int* input, unsigned int inputSize,
+                           unsigned int alphabetSize) {
     unsigned int* subBeginCpy = malloc(sizeof(unsigned int) * alphabetSize);
     if (!subBeginCpy) return mallocErr;
     memcpy(subBeginCpy, subIndexes[BEGIN], sizeof(unsigned int) * alphabetSize);
@@ -78,9 +85,10 @@ errors sizetLinductionSort(unsigned int* suffixArray, unsigned int* subIndexes[2
     return success;
 }
 
-errors sizetSinductionSort(unsigned int* suffixArray, unsigned int* subIndexes[2],
-                           unsigned char* typedIdx, unsigned int* input,
-                           unsigned int inputSize, unsigned int alphabetSize) {
+errors sizetSinductionSort(unsigned int* suffixArray,
+                           unsigned int* subIndexes[2], unsigned char* typedIdx,
+                           unsigned int* input, unsigned int inputSize,
+                           unsigned int alphabetSize) {
     unsigned int* subEndCopy = malloc(sizeof(unsigned int) * alphabetSize);
     if (!subEndCopy) return mallocErr;
     memcpy(subEndCopy, subIndexes[END], sizeof(unsigned int) * alphabetSize);
@@ -98,7 +106,8 @@ errors sizetSinductionSort(unsigned int* suffixArray, unsigned int* subIndexes[2
 }
 
 bool sizetCompareLmsSubstrings(unsigned int* input, unsigned char* typedIdx,
-                               unsigned int s1Idx, unsigned int s2Idx, unsigned int inputSize) {
+                               unsigned int s1Idx, unsigned int s2Idx,
+                               unsigned int inputSize) {
     bool wasLs1 = false, endS1 = false, typeS1;
     bool wasLs2 = false, endS2 = false, typeS2;
     unsigned int i = 0;
@@ -191,15 +200,19 @@ errors sizetFindSameSubstrings(unsigned int* input, unsigned int* sufArr,
     return success;
 }
 
-static inline void sizetFinalLMSFill(unsigned int* input, unsigned int* orderedLMSindexes,
-                       unsigned int indexAmount, unsigned int* ssEnd, unsigned int* sufArr) {
+static inline void sizetFinalLMSFill(unsigned int* input,
+                                     unsigned int* orderedLMSindexes,
+                                     unsigned int indexAmount,
+                                     unsigned int* ssEnd,
+                                     unsigned int* sufArr) {
     sufArr[0] = orderedLMSindexes[0];
     for (unsigned int i = indexAmount - 1; i > 0; i--) {
         sufArr[ssEnd[input[orderedLMSindexes[i]]]--] = orderedLMSindexes[i];
     }
 }
 
-errors sizetSAIS(unsigned int* input, rec_sais_out* output, unsigned int alphabetSize) {
+errors sizetSAIS(unsigned int* input, rec_sais_out* output,
+                 unsigned int alphabetSize) {
     unsigned char* typedOut =
         calloc(BITVECTOR_BYTE_COUNT(output->size), sizeof(unsigned char));
     if (!typedOut) return mallocErr;
@@ -211,7 +224,8 @@ errors sizetSAIS(unsigned int* input, rec_sais_out* output, unsigned int alphabe
     }
 
     LMSArray LMSindexes = {.indexAmount = 0};
-    if (!(LMSindexes.array = malloc(sizeof(unsigned int) * (output->size + 1)))) {
+    if (!(LMSindexes.array =
+              malloc(sizeof(unsigned int) * (output->size + 1)))) {
         free(typedOut);
         free(charCounts);
         return mallocErr;
@@ -258,7 +272,8 @@ errors sizetSAIS(unsigned int* input, rec_sais_out* output, unsigned int alphabe
         free(suffixArr);
         return mallocErr;
     }
-    memcpy(ssEndCopy, substringIndexes[END], sizeof(unsigned int) * alphabetSize);
+    memcpy(ssEndCopy, substringIndexes[END],
+           sizeof(unsigned int) * alphabetSize);
 
     sizetFillLMS(&LMSindexes, ssEndCopy, suffixArr, output->size, input);
 
@@ -290,7 +305,8 @@ errors sizetSAIS(unsigned int* input, rec_sais_out* output, unsigned int alphabe
     }
 
     memset(suffixArr, -1, (output->size + 1) * sizeof(unsigned int));
-    memcpy(ssEndCopy, substringIndexes[END], sizeof(unsigned int) * alphabetSize);
+    memcpy(ssEndCopy, substringIndexes[END],
+           sizeof(unsigned int) * alphabetSize);
     sizetFinalLMSFill(input, finalOrderLMSindexes, LMSindexes.indexAmount,
                       ssEndCopy, suffixArr);
 
@@ -343,8 +359,9 @@ int ucSortTypes(unsigned int inputSize, unsigned char* input,
 
 // fills in start and end of char in array (arr[?][i] = start/end of ASCII[i])
 
-static inline void ucFillLMS(LMSArray* indexes, unsigned int* substringI, unsigned int* suffArr,
-               unsigned int inputSize, unsigned char* input) {
+static inline void ucFillLMS(LMSArray* indexes, unsigned int* substringI,
+                             unsigned int* suffArr, unsigned int inputSize,
+                             unsigned char* input) {
     suffArr[0] = inputSize;
     for (unsigned int i = 1; i < indexes->indexAmount; i++) {
         suffArr[substringI[input[indexes->array[i]]]--] =
@@ -388,7 +405,8 @@ void ucSinductionSort(unsigned int* suffixArray, unsigned int* subIndexes[2],
 }
 
 bool ucCompareLmsSubstrings(unsigned char* input, unsigned char* typedIdx,
-                            unsigned int s1Idx, unsigned int s2Idx, unsigned int inputSize) {
+                            unsigned int s1Idx, unsigned int s2Idx,
+                            unsigned int inputSize) {
     bool wasLs1 = false, endS1 = false, typeS1;
     bool wasLs2 = false, endS2 = false, typeS2;
     unsigned int i = 0;
@@ -451,7 +469,8 @@ errors ucFindSameSubstrings(unsigned char* input, unsigned int* sufArr,
 
     if (name + 1 < nameAmount) {
         rec_sais_out out = {.size = nameAmount};
-        unsigned int* denseArr = malloc(sizeof(unsigned int) * (lmsArr->indexAmount));
+        unsigned int* denseArr =
+            malloc(sizeof(unsigned int) * (lmsArr->indexAmount));
         if (!denseArr) {
             free(nameArr);
             return mallocErr;
@@ -490,35 +509,33 @@ errors ucFindSameSubstrings(unsigned char* input, unsigned int* sufArr,
     return success;
 }
 
-static inline void ucFinalLMSFill(unsigned char* input, unsigned int* orderedLMSindexes,
-                    unsigned int indexAmount, unsigned int* ssEnd, unsigned int* sufArr) {
+static inline void ucFinalLMSFill(unsigned char* input,
+                                  unsigned int* orderedLMSindexes,
+                                  unsigned int indexAmount, unsigned int* ssEnd,
+                                  unsigned int* sufArr) {
     sufArr[0] = orderedLMSindexes[0];
     for (unsigned int i = indexAmount - 1; i > 0; i--) {
         sufArr[ssEnd[input[orderedLMSindexes[i]]]--] = orderedLMSindexes[i];
     }
 }
 
-errors bwtTransform(unsigned char* input, unsigned int inputSize,
-                    unsigned char* output) {
-    if (inputSize == 0) return emptyInput;
-    unsigned char* typedOut =
-        calloc(BITVECTOR_BYTE_COUNT(inputSize), sizeof(unsigned char));
-    if (!typedOut) return mallocErr;
+static inline errors processChunkT(unsigned char* currentInput,
+                                   unsigned int currentChunkSize,
+                                   unsigned char* currentOutput,
+                                   unsigned char* typedOut,
+                                   unsigned int* suffixArr,
+                                   unsigned int* lmsArray) {
+    memset(typedOut, 0, BITVECTOR_BYTE_COUNT(currentChunkSize));
+    memset(suffixArr, -1, (currentChunkSize + 1) * sizeof(unsigned int));
 
+    LMSArray LMSindexes = {.indexAmount = 0, .array = lmsArray};
     unsigned int charCounts[AMOUNT_OF_VALUES] = {0};
 
-    LMSArray LMSindexes = {.indexAmount = 0};
-    if (!(LMSindexes.array = malloc(sizeof(unsigned int) * (inputSize + 1)))) {
-        free(typedOut);
-        return mallocErr;
-    }
-
-    if (ucSortTypes(inputSize, input, typedOut, charCounts, &LMSindexes) ==
-        ALL_SAME_INPUT) {
-        memset(output + 1, 0, sizeof(unsigned int));
-        memcpy(output + BWT_HEADER_SIZE, input, inputSize);
-        free(typedOut);
-        free(LMSindexes.array);
+    if (ucSortTypes(currentChunkSize, currentInput, typedOut, charCounts,
+                    &LMSindexes) == ALL_SAME_INPUT) {
+        unsigned int zeroIndex = 0;
+        memcpy(currentOutput + 1, &zeroIndex, sizeof(unsigned int));
+        memcpy(currentOutput + BWT_HEADER_SIZE, currentInput, currentChunkSize);
         return success;
     }
 
@@ -527,94 +544,164 @@ errors bwtTransform(unsigned char* input, unsigned int inputSize,
     unsigned int* substringIndexes[2] = {ssIdxBegin, ssIdxEnd};
     fillSubstringIndexes(substringIndexes, charCounts, AMOUNT_OF_VALUES);
 
-    unsigned int* suffixArr = malloc((inputSize + 1) * sizeof(unsigned int));
-    if (!suffixArr) {
-        free(typedOut);
-        free(LMSindexes.array);
-        return mallocErr;
-    }
-    memset(suffixArr, -1, (inputSize + 1) * sizeof(unsigned int));
-
     unsigned int ssEndCopy[AMOUNT_OF_VALUES];
-    memcpy(ssEndCopy, substringIndexes[END], sizeof(unsigned int) * AMOUNT_OF_VALUES);
+    memcpy(ssEndCopy, substringIndexes[END],
+           sizeof(unsigned int) * AMOUNT_OF_VALUES);
 
-    ucFillLMS(&LMSindexes, ssEndCopy, suffixArr, inputSize, input);
+    ucFillLMS(&LMSindexes, ssEndCopy, suffixArr, currentChunkSize,
+              currentInput);
 
-    ucLinductionSort(suffixArr, substringIndexes, typedOut, input, inputSize);
-    ucSinductionSort(suffixArr, substringIndexes, typedOut, input, inputSize);
+    ucLinductionSort(suffixArr, substringIndexes, typedOut, currentInput,
+                     currentChunkSize);
+    ucSinductionSort(suffixArr, substringIndexes, typedOut, currentInput,
+                     currentChunkSize);
 
     unsigned int* finalOrderLMSindexes;
-    if (ucFindSameSubstrings(input, suffixArr, typedOut, inputSize, &LMSindexes,
+    if (ucFindSameSubstrings(currentInput, suffixArr, typedOut,
+                             currentChunkSize, &LMSindexes,
                              &finalOrderLMSindexes) != success) {
-        free(typedOut);
-        free(suffixArr);
-        free(LMSindexes.array);
         return mallocErr;
     }
 
-    memset(suffixArr, -1, (inputSize + 1) * sizeof(unsigned int));
-    memcpy(ssEndCopy, substringIndexes[END], sizeof(unsigned int) * AMOUNT_OF_VALUES);
-    ucFinalLMSFill(input, finalOrderLMSindexes, LMSindexes.indexAmount,
+    memset(suffixArr, -1, (currentChunkSize + 1) * sizeof(unsigned int));
+    memcpy(ssEndCopy, substringIndexes[END],
+           sizeof(unsigned int) * AMOUNT_OF_VALUES);
+    ucFinalLMSFill(currentInput, finalOrderLMSindexes, LMSindexes.indexAmount,
                    ssEndCopy, suffixArr);
 
-    ucLinductionSort(suffixArr, substringIndexes, typedOut, input, inputSize);
-    ucSinductionSort(suffixArr, substringIndexes, typedOut, input, inputSize);
+    ucLinductionSort(suffixArr, substringIndexes, typedOut, currentInput,
+                     currentChunkSize);
+    ucSinductionSort(suffixArr, substringIndexes, typedOut, currentInput,
+                     currentChunkSize);
     free(finalOrderLMSindexes);
 
     unsigned int initialIndex = 0;
-    unsigned char* packedData = output + BWT_HEADER_SIZE;
+    unsigned char* packedData = currentOutput + BWT_HEADER_SIZE;
     unsigned int packedIdx = 0;
 
-    for (unsigned int i = 0; i <= inputSize; i++) {
+    for (unsigned int i = 0; i <= currentChunkSize; i++) {
         if (suffixArr[i] == 0) {
             initialIndex = i;
         } else {
-            packedData[packedIdx++] = input[suffixArr[i] - 1];
+            packedData[packedIdx++] = currentInput[suffixArr[i] - 1];
         }
     }
-    memcpy(output + 1, &initialIndex, sizeof(unsigned int));
-    free(typedOut);
-    free(suffixArr);
-    free(LMSindexes.array);
+    memcpy(currentOutput + 1, &initialIndex, sizeof(unsigned int));
+
     return success;
 }
-errors bwtRetransform(unsigned char* input, unsigned int inputSize,
-                      unsigned char* output) {
+
+errors bwtTransform(unsigned char* input, unsigned int inputSize,
+                    unsigned char* output) {
     if (inputSize == 0) return emptyInput;
 
-    unsigned int initialIndex = 0;
-    memcpy(&initialIndex, input + 1, sizeof(unsigned int));
-    unsigned char* transformed = input + BWT_HEADER_SIZE;
+    unsigned int maxAllocSize = (inputSize > MAX_CHUNK) ? MAX_CHUNK : inputSize;
 
-    if (initialIndex > inputSize) return generalError;
+    unsigned char* typedOut =
+        calloc(BITVECTOR_BYTE_COUNT(maxAllocSize), sizeof(unsigned char));
+    unsigned int* lmsArray = malloc(sizeof(unsigned int) * (maxAllocSize + 1));
+    unsigned int* suffixArr = malloc((maxAllocSize + 1) * sizeof(unsigned int));
+
+    if (!typedOut || !lmsArray || !suffixArr) {
+        free(typedOut);
+        free(lmsArray);
+        free(suffixArr);
+        return mallocErr;
+    }
+
+    for (unsigned int offset = 0, chunkIdx = 0; offset < inputSize;
+         offset += MAX_CHUNK, chunkIdx++) {
+        unsigned int currentChunkSize = inputSize - offset;
+        if (currentChunkSize > MAX_CHUNK) currentChunkSize = MAX_CHUNK;
+
+        unsigned char* currentInput = input + offset;
+        unsigned char* currentOutput =
+            output + offset + (chunkIdx * BWT_HEADER_SIZE);
+
+        errors chunkStatus =
+            processChunkT(currentInput, currentChunkSize, currentOutput,
+                                  typedOut, suffixArr, lmsArray);
+
+        if (chunkStatus != success) {
+            free(typedOut);
+            free(lmsArray);
+            free(suffixArr);
+            return chunkStatus;
+        }
+    }
+
+    free(typedOut);
+    free(lmsArray);
+    free(suffixArr);
+    return success;
+}
+
+static inline errors processChunkRT(unsigned char* currentChunkInput,
+                                    unsigned int currentChunkSize,
+                                    unsigned char* currentChunkOutput,
+                                    unsigned int* LF) {
+    unsigned int initialIndex = 0;
+    memcpy(&initialIndex, currentChunkInput + 1, sizeof(unsigned int));
+    unsigned char* transformed = currentChunkInput + BWT_HEADER_SIZE;
+
+    if (initialIndex > currentChunkSize) {
+        return generalError;
+    }
+
     unsigned int count[AMOUNT_OF_VALUES] = {0};
-    for (unsigned int i = 0; i < inputSize; i++) {
+    for (unsigned int i = 0; i < currentChunkSize; i++) {
         count[transformed[i]]++;
     }
 
     unsigned int F_start[AMOUNT_OF_VALUES] = {0};
-    unsigned int sum = 1; 
+    unsigned int sum = 1;
     for (int i = 0; i < AMOUNT_OF_VALUES; i++) {
         F_start[i] = sum;
         sum += count[i];
     }
 
-    unsigned int* LF = malloc(sizeof(unsigned int) * inputSize);
-    if (!LF) return mallocErr;
-
-    for (unsigned int i = 0; i < inputSize; i++) {
+    for (unsigned int i = 0; i < currentChunkSize; i++) {
         LF[i] = F_start[transformed[i]]++;
     }
 
     unsigned int curr_packed = 0;
-    for (int i = (int)inputSize - 1; i >= 0; i--) {
-        output[i] = transformed[curr_packed];
+    for (int i = (int)currentChunkSize - 1; i >= 0; i--) {
+        currentChunkOutput[i] = transformed[curr_packed];
         unsigned int next_row = LF[curr_packed];
-        
+
         if (next_row < initialIndex) {
             curr_packed = next_row;
         } else if (next_row > initialIndex) {
             curr_packed = next_row - 1;
+        }
+    }
+
+    return success;
+}
+
+errors bwtRetransform(unsigned char* input, unsigned int inputSize,
+                      unsigned char* output) {
+    if (inputSize == 0) return emptyInput;
+
+    unsigned int maxAllocSize = (inputSize > MAX_CHUNK) ? MAX_CHUNK : inputSize;
+    unsigned int* LF = malloc(sizeof(unsigned int) * maxAllocSize);
+    if (!LF) return mallocErr;
+
+    for (unsigned int offset = 0, chunkIdx = 0; offset < inputSize;
+         offset += MAX_CHUNK, chunkIdx++) {
+        unsigned int currentChunkSize = inputSize - offset;
+        if (currentChunkSize > MAX_CHUNK) currentChunkSize = MAX_CHUNK;
+
+        unsigned char* currentChunkInput =
+            input + offset + (chunkIdx * BWT_HEADER_SIZE);
+        unsigned char* currentChunkOutput = output + offset;
+
+        errors chunkStatus = processChunkRT(currentChunkInput, currentChunkSize,
+                                            currentChunkOutput, LF);
+
+        if (chunkStatus != success) {
+            free(LF);
+            return chunkStatus;
         }
     }
 
