@@ -343,6 +343,89 @@ testResult roundTripAllSameTest() {
 
     return runRoundTripCase(testCase);
 }
+testResult roundTripFibonacciTest() {
+    unsigned int sz = 2000;
+    unsigned char* buf = calloc(sz, 1);
+    buf[0] = 'b';
+    buf[1] = 'a';
+    unsigned int la = 1, lb = 1, pos = 2;
+    while (pos < sz) {
+        unsigned int copylen = la;
+        if (pos + copylen > sz) copylen = sz - pos;
+        memcpy(buf + pos, buf + pos - la - lb, copylen);
+        pos += copylen;
+        unsigned int tmp = la;
+        la = la + lb;
+        lb = tmp;
+    }
+    roundTripCase testCase = {
+        .name = "Round-trip Fibonacci (highly repetitive) test",
+        .input = buf,
+        .inputSize = sz,
+    };
+    testResult res = runRoundTripCase(testCase);
+    free(buf);
+    return res;
+}
+
+testResult roundTripBinaryTest() {
+    unsigned int sz = 500;
+    unsigned char* buf = malloc(sz);
+    for (unsigned int i = 0; i < sz; i++) buf[i] = (i % 2) ? 0xFF : 0x00;
+    roundTripCase testCase = {
+        .name = "Round-trip binary (0x00 / 0xFF) test",
+        .input = buf,
+        .inputSize = sz,
+    };
+    testResult res = runRoundTripCase(testCase);
+    free(buf);
+    return res;
+}
+
+testResult roundTripAscendingTest() {
+    unsigned int sz = 256;
+    unsigned char* buf = malloc(sz);
+    for (unsigned int i = 0; i < sz; i++) buf[i] = (unsigned char)i;
+    roundTripCase testCase = {
+        .name = "Round-trip ascending test",
+        .input = buf,
+        .inputSize = sz,
+    };
+    testResult res = runRoundTripCase(testCase);
+    free(buf);
+    return res;
+}
+
+testResult roundTripAlternatingTest() {
+    unsigned int sz = 300;
+    unsigned char* buf = malloc(sz);
+    for (unsigned int i = 0; i < sz; i++) buf[i] = 'a' + (i % 3);  // abcabc...
+    roundTripCase testCase = {
+        .name = "Round-trip alternating (abcabc...) test",
+        .input = buf,
+        .inputSize = sz,
+    };
+    testResult res = runRoundTripCase(testCase);
+    free(buf);
+    return res;
+}
+
+testResult roundTripRandomTest() {
+    unsigned int sz = 5000;
+    unsigned char* buf = malloc(sz);
+    srand(42);
+    for (unsigned int i = 0; i < sz; i++)
+        buf[i] = (unsigned char)(rand() % 256);
+    roundTripCase testCase = {
+        .name = "Round-trip large random data test",
+        .input = buf,
+        .inputSize = sz,
+    };
+    testResult res = runRoundTripCase(testCase);
+    free(buf);
+    return res;
+}
+
 int main() {
     int counter[3] = {0};
     counter[transformationTest()]++;
@@ -358,6 +441,11 @@ int main() {
     counter[roundTripBasicTest()]++;
     counter[roundTripPunctuationTest()]++;
     counter[roundTripAllSameTest()]++;
+    counter[roundTripFibonacciTest()]++;
+    counter[roundTripBinaryTest()]++;
+    counter[roundTripAscendingTest()]++;
+    counter[roundTripAlternatingTest()]++;
+    counter[roundTripRandomTest()]++;
 
     fprintf(stdout, "Tests completed, PASSES: %i, FAILS: %i, ERRORS:%i\n",
             counter[pass], counter[fail], counter[error]);
