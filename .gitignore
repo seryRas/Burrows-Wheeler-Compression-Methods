@@ -52,6 +52,8 @@ Mkfile.old
 dkms.conf
 
 
+
+bzip2
 bwt
 testdata
 bwt-radix

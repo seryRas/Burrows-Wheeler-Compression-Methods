@@ -36,27 +36,26 @@ typedef struct {
 } roundTripCase;
 
 testResult runTransformationCase(transformationCase testCase) {
-    unsigned char* result = malloc(testCase.inputSize + BWT_HEADER_SIZE);
+    unsigned char* result = malloc(testCase.inputSize);
     if (result == NULL) return error;
 
-    if (bwtTransform(testCase.input, testCase.inputSize, result) != success) {
+    unsigned int bwtIndex = 0;
+    if (bwtTransform(testCase.input, testCase.inputSize, result, &bwtIndex) != success) {
         free(result);
         return error;
     }
 
-    if (memcmp(testCase.expectedResult, result + BWT_HEADER_SIZE,
+    if (memcmp(testCase.expectedResult, result,
                testCase.inputSize) != 0) {
         fprintf(stdout, "FAIL: %s, expected: %s, received: %s\n", testCase.name,
-                testCase.expectedResult, result + BWT_HEADER_SIZE);
+                testCase.expectedResult, result);
         free(result);
         return fail;
     }
 
-    unsigned int initialIndex = 0;
-    memcpy(&initialIndex, result + 1, sizeof(unsigned int));
-    if (initialIndex != testCase.expectedIndex) {
+    if (bwtIndex != testCase.expectedIndex) {
         fprintf(stdout, "FAIL: %s, expected index: %u, received: %u\n",
-                testCase.name, testCase.expectedIndex, initialIndex);
+                testCase.name, testCase.expectedIndex, bwtIndex);
         free(result);
         return fail;
     }
@@ -67,10 +66,11 @@ testResult runTransformationCase(transformationCase testCase) {
 }
 
 testResult runErrorCase(errorCase testCase) {
-    unsigned char* result = malloc(testCase.inputSize + BWT_HEADER_SIZE);
+    unsigned char* result = malloc(testCase.inputSize);
     if (testCase.inputSize > 0 && result == NULL) return error;
 
-    if (bwtTransform(testCase.input, testCase.inputSize, result) !=
+    unsigned int bwtIndex = 0;
+    if (bwtTransform(testCase.input, testCase.inputSize, result, &bwtIndex) !=
         testCase.expectedReturn) {
         fprintf(stdout, "FAIL: %s, expected return code: %i\n", testCase.name,
                 testCase.expectedReturn);
@@ -84,12 +84,9 @@ testResult runErrorCase(errorCase testCase) {
 }
 
 testResult runRetransformCase(retransformCase testCase) {
-    unsigned char* transformed = malloc(testCase.inputSize + BWT_HEADER_SIZE);
+    unsigned char* transformed = malloc(testCase.inputSize);
     if (transformed == NULL) return error;
-    transformed[0] = 0;
-    memcpy(transformed + 1, &testCase.initialIndex, sizeof(unsigned int));
-    memcpy(transformed + BWT_HEADER_SIZE, testCase.transformed,
-           testCase.inputSize);
+    memcpy(transformed, testCase.transformed, testCase.inputSize);
     unsigned char* output = malloc(testCase.inputSize + 1);
     if (output == NULL) {
         free(transformed);
@@ -97,7 +94,7 @@ testResult runRetransformCase(retransformCase testCase) {
     }
     output[testCase.inputSize] = '\0';
 
-    if (bwtRetransform(transformed, testCase.inputSize, output) != success) {
+    if (bwtRetransform(transformed, testCase.inputSize, output, testCase.initialIndex) != success) {
         free(output);
         free(transformed);
         return error;
@@ -118,10 +115,11 @@ testResult runRetransformCase(retransformCase testCase) {
 }
 
 testResult runRoundTripCase(roundTripCase testCase) {
-    unsigned char* transformed = malloc(testCase.inputSize + BWT_HEADER_SIZE);
+    unsigned char* transformed = malloc(testCase.inputSize);
     if (transformed == NULL) return error;
 
-    if (bwtTransform(testCase.input, testCase.inputSize, transformed) !=
+    unsigned int bwtIndex = 0;
+    if (bwtTransform(testCase.input, testCase.inputSize, transformed, &bwtIndex) !=
         success) {
         free(transformed);
         return error;
@@ -134,7 +132,7 @@ testResult runRoundTripCase(roundTripCase testCase) {
     }
     output[testCase.inputSize] = '\0';
 
-    if (bwtRetransform(transformed, testCase.inputSize, output) != success) {
+    if (bwtRetransform(transformed, testCase.inputSize, output, bwtIndex) != success) {
         free(output);
         free(transformed);
         return error;
@@ -155,14 +153,12 @@ testResult runRoundTripCase(roundTripCase testCase) {
 }
 
 testResult runRetransformErrorCase(errorCase testCase) {
-    unsigned char* transformed = malloc(testCase.inputSize + BWT_HEADER_SIZE);
+    unsigned char* transformed = malloc(testCase.inputSize);
     if (testCase.inputSize > 0 && transformed == NULL) return error;
-    transformed[0] = 0;
-    memset(transformed + 1, 0, sizeof(unsigned int));
-    memcpy(transformed + BWT_HEADER_SIZE, testCase.input, testCase.inputSize);
+    memcpy(transformed, testCase.input, testCase.inputSize);
     unsigned char outputPlaceholder[1] = {0};
 
-    if (bwtRetransform(transformed, testCase.inputSize, outputPlaceholder) !=
+    if (bwtRetransform(transformed, testCase.inputSize, outputPlaceholder, 0) !=
         testCase.expectedReturn) {
         fprintf(stdout, "FAIL: %s, expected return code: %i\n", testCase.name,
                 testCase.expectedReturn);
@@ -245,18 +241,6 @@ testResult punctuationAndSpaceTest() {
     return runTransformationCase(testCase);
 }
 
-testResult emptyInputTest() {
-    unsigned char word[] = "";
-    errorCase testCase = {
-        .name = "Empty input test",
-        .input = word,
-        .inputSize = 0,
-        .expectedReturn = emptyInput,
-    };
-
-    return runErrorCase(testCase);
-}
-
 testResult allSameCharactersTest() {
     unsigned char word[] = "aaaaaa";
     unsigned char expectedResult[] = "aaaaaa";
@@ -297,18 +281,6 @@ testResult retransformAllSameCharactersTest() {
     };
 
     return runRetransformCase(testCase);
-}
-
-testResult retransformEmptyInputTest() {
-    unsigned char transformed[] = "";
-    errorCase testCase = {
-        .name = "Retransform empty input test",
-        .input = transformed,
-        .inputSize = 0,
-        .expectedReturn = emptyInput,
-    };
-
-    return runRetransformErrorCase(testCase);
 }
 
 testResult roundTripBasicTest() {
@@ -426,6 +398,43 @@ testResult roundTripRandomTest() {
     return res;
 }
 
+
+testResult transformEmptyInputTest() {
+    errorCase testCase = {
+        .name = "Transform empty input test",
+        .input = (unsigned char*)"",
+        .inputSize = 0,
+        .expectedReturn = emptyInput
+    };
+    return runErrorCase(testCase);
+}
+
+testResult retransformEmptyInputTest() {
+    errorCase testCase = {
+        .name = "Retransform empty input test",
+        .input = (unsigned char*)"",
+        .inputSize = 0,
+        .expectedReturn = emptyInput
+    };
+    return runRetransformErrorCase(testCase);
+}
+
+testResult retransformOutOfBoundsIndexTest() {
+    errorCase testCase = {
+        .name = "Retransform out-of-bounds index test",
+        .input = (unsigned char*)"abc",
+        .inputSize = 3,
+        .expectedReturn = generalError
+    };
+    unsigned char output[10];
+    if (bwtRetransform(testCase.input, testCase.inputSize, output, 4) != generalError) {
+        fprintf(stdout, "FAIL: %s\n", testCase.name);
+        return fail;
+    }
+    fprintf(stdout, "PASS: %s\n", testCase.name);
+    return pass;
+}
+
 int main() {
     int counter[3] = {0};
     counter[transformationTest()]++;
@@ -433,11 +442,9 @@ int main() {
     counter[twoCharacterTest()]++;
     counter[repeatedCharacterMixTest()]++;
     counter[punctuationAndSpaceTest()]++;
-    counter[emptyInputTest()]++;
     counter[allSameCharactersTest()]++;
     counter[retransformKnownCaseTest()]++;
     counter[retransformAllSameCharactersTest()]++;
-    counter[retransformEmptyInputTest()]++;
     counter[roundTripBasicTest()]++;
     counter[roundTripPunctuationTest()]++;
     counter[roundTripAllSameTest()]++;
@@ -446,6 +453,9 @@ int main() {
     counter[roundTripAscendingTest()]++;
     counter[roundTripAlternatingTest()]++;
     counter[roundTripRandomTest()]++;
+    counter[transformEmptyInputTest()]++;
+    counter[retransformEmptyInputTest()]++;
+    counter[retransformOutOfBoundsIndexTest()]++;
 
     fprintf(stdout, "Tests completed, PASSES: %i, FAILS: %i, ERRORS:%i\n",
             counter[pass], counter[fail], counter[error]);
