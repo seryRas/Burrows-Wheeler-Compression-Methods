@@ -26,7 +26,8 @@ errors RLE1decode(RLE1info* data, unsigned char** output,
                   unsigned int* outputSize, unsigned int chunkSize);
 
 errors RLE2encode(unsigned char* input, unsigned int inputSize,
-                  unsigned char** output, unsigned int* outputSize);
+                  unsigned char** output, unsigned int* outputSize,
+                  unsigned int* freqMap);
 
 errors RLE2decode(unsigned char* input, unsigned int inputSize,
                   unsigned char** output, unsigned int* outputSize,

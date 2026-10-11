@@ -167,7 +167,7 @@ static bool rle2Vector(const unsigned char* in, unsigned int n,
                        const unsigned char* exp, unsigned int expN) {
     unsigned char* out = NULL;
     unsigned int outN = 0;
-    EXPECT(RLE2encode((unsigned char*)in, n, &out, &outN) == success);
+    EXPECT(RLE2encode((unsigned char*)in, n, &out, &outN, NULL) == success);
     bool ok = bytesMatch(out, outN, exp, expN);
     free(out);
     if (!ok) return false;
@@ -184,7 +184,7 @@ static bool rle2Vector(const unsigned char* in, unsigned int n,
 static bool rle2RoundTrip(const unsigned char* in, unsigned int n) {
     unsigned char* enc = NULL;
     unsigned int encN = 0;
-    EXPECT(RLE2encode((unsigned char*)in, n, &enc, &encN) == success);
+    EXPECT(RLE2encode((unsigned char*)in, n, &enc, &encN, NULL) == success);
     EXPECT(encN <= n * 2 + 2);
     EXPECT(enc[encN - 2] == 0 && enc[encN - 1] == 0);
 
@@ -283,7 +283,7 @@ static bool pipelineRoundTrip(const unsigned char* input, unsigned int n,
         }
     }
 
-    if (RLE2encode(mtf, rle1N, &rle2, &rle2N) != success) {
+    if (RLE2encode(mtf, rle1N, &rle2, &rle2N, NULL) != success) {
         printf("    RLE2encode failed\n");
         return freePipelineBuffers(false, rle1, bwt, mtf, rle2, mtfDec, bwtDec,
                                    rle1Dec, final);
@@ -870,7 +870,7 @@ static bool rle2WorstCase(void) {
     for (unsigned int i = 0; i < n; i++) in[i] = (i % 2) ? 9 : 0;
     unsigned char* out = NULL;
     unsigned int outN = 0;
-    errors r = RLE2encode(in, n, &out, &outN);
+    errors r = RLE2encode(in, n, &out, &outN, NULL);
     free(out);
     bool ok = r == success && outN == 1502 && rle2RoundTrip(in, n);
     free(in);
@@ -1085,6 +1085,237 @@ static bool pipeManySmallSizes(void) {
 }
 
 // ============================================================================
+//  Huffman unit & edgecase tests
+// ============================================================================
+
+static bool huffRoundTrip(const unsigned char* in, unsigned int n) {
+    if (n == 0) return true;
+    unsigned int freq[ALPHABET_SIZE] = {0};
+    for (unsigned int i = 0; i < n; i++) freq[in[i]]++;
+
+    unsigned char* enc = NULL;
+    unsigned int encN = 0;
+    EXPECT(huffmanEncode(freq, (unsigned char*)in, &enc, n, &encN) == success);
+    EXPECT(enc != NULL);
+    EXPECT(encN >= HUFFMAN_HEADER);
+
+    unsigned char* dec = NULL;
+    unsigned int decN = 0;
+    EXPECT(huffmanDecode(enc, encN, &dec, &decN, n) == success);
+    EXPECT(decN == n);
+    bool ok = bytesMatch(dec, decN, in, n);
+    free(enc);
+    free(dec);
+    return ok;
+}
+
+static bool huffRtSingle(void) {
+    const unsigned char in[] = {'X'};
+    return huffRoundTrip(in, 1);
+}
+
+static bool huffRtAllSame(void) {
+    unsigned char* in = makeRun('A', 5000);
+    bool ok = huffRoundTrip(in, 5000);
+    free(in);
+    return ok;
+}
+
+static bool huffRtAllZeros(void) {
+    unsigned char* in = makeRun(0, 10000);
+    bool ok = huffRoundTrip(in, 10000);
+    free(in);
+    return ok;
+}
+
+static bool huffRtAll256(void) {
+    unsigned char in[256];
+    for (int i = 0; i < 256; i++) in[i] = (unsigned char)i;
+    return huffRoundTrip(in, 256);
+}
+
+static bool huffRtSkewedFibonacci(void) {
+    unsigned int n = 5000;
+    unsigned char* in = malloc(n);
+    unsigned int idx = 0;
+    for (int i = 0; i < 4000 && idx < n; i++) in[idx++] = 0;
+    for (int i = 0; i < 500 && idx < n; i++) in[idx++] = 1;
+    for (int i = 0; i < 200 && idx < n; i++) in[idx++] = 2;
+    for (int i = 0; i < 100 && idx < n; i++) in[idx++] = 3;
+    while (idx < n) in[idx++] = (unsigned char)(rng() % 20 + 4);
+    bool ok = huffRoundTrip(in, n);
+    free(in);
+    return ok;
+}
+
+static bool huffRtRandom(void) {
+    unsigned int n = 20000;
+    unsigned char* in = malloc(n);
+    fillRandom(in, n);
+    bool ok = huffRoundTrip(in, n);
+    free(in);
+    return ok;
+}
+
+static bool huffDecZeroExpectedSize(void) {
+    unsigned char* dec = (unsigned char*)1;
+    unsigned int decN = 1;
+    unsigned char dummy[HUFFMAN_HEADER] = {0};
+    EXPECT(huffmanDecode(dummy, HUFFMAN_HEADER, &dec, &decN, 0) == success);
+    EXPECT(dec == NULL && decN == 0);
+    return true;
+}
+
+static bool huffDecTruncatedHeader(void) {
+    unsigned char shortIn[10] = {0};
+    unsigned char* dec = NULL;
+    unsigned int decN = 0;
+    EXPECT(huffmanDecode(shortIn, 10, &dec, &decN, 10) == corruptedData);
+    EXPECT(dec == NULL && decN == 0);
+    return true;
+}
+
+static bool huffDecDepthTooLarge(void) {
+    unsigned char in[HUFFMAN_HEADER + 10] = {0};
+    in[0] = 16;
+    unsigned char* dec = NULL;
+    unsigned int decN = 0;
+    EXPECT(huffmanDecode(in, sizeof(in), &dec, &decN, 10) == corruptedData);
+    EXPECT(dec == NULL && decN == 0);
+    return true;
+}
+
+static bool huffDecZeroActiveSymbols(void) {
+    unsigned char in[HUFFMAN_HEADER + 10] = {0};
+    unsigned char* dec = NULL;
+    unsigned int decN = 0;
+    EXPECT(huffmanDecode(in, sizeof(in), &dec, &decN, 10) == corruptedData);
+    EXPECT(dec == NULL && decN == 0);
+    return true;
+}
+
+// ============================================================================
+//  Full bzip2 block compress/decompress end-to-end tests
+// ============================================================================
+
+static bool bzipBlockRoundTrip(const unsigned char* in, unsigned int n) {
+    unsigned char* comp = NULL;
+    unsigned int compN = 0;
+    EXPECT(bzip2CompressBlock((unsigned char*)in, n, &comp, &compN) == success);
+    if (n == 0) {
+        EXPECT(comp == NULL && compN == 0);
+        return true;
+    }
+    EXPECT(comp != NULL && compN > sizeof(bzip2Header));
+
+    unsigned char* decomp = NULL;
+    unsigned int decompN = 0;
+    EXPECT(bzip2DecompressBlock(comp, compN, &decomp, &decompN) == success);
+    EXPECT(decompN == n);
+    bool ok = bytesMatch(decomp, decompN, in, n);
+    free(comp);
+    free(decomp);
+    return ok;
+}
+
+static bool bzipRtEmpty(void) {
+    return bzipBlockRoundTrip(NULL, 0);
+}
+
+static bool bzipRtSingleByte(void) {
+    const unsigned char in[] = {'Z'};
+    return bzipBlockRoundTrip(in, 1);
+}
+
+static bool bzipRtTwoBytes(void) {
+    return bzipBlockRoundTrip((const unsigned char*)"AB", 2);
+}
+
+static bool bzipRtBanana(void) {
+    return bzipBlockRoundTrip((const unsigned char*)"banana", 6);
+}
+
+static bool bzipRtText(void) {
+    const char* text =
+        "Bzip2 full block compression with Canonical Huffman, RLE, MTF, and BWT! "
+        "The quick brown fox jumps over the lazy dog. 1234567890.";
+    return bzipBlockRoundTrip((const unsigned char*)text, (unsigned int)strlen(text));
+}
+
+static bool bzipRtAllSame(void) {
+    unsigned char* in = makeRun('M', 10000);
+    bool ok = bzipBlockRoundTrip(in, 10000);
+    free(in);
+    return ok;
+}
+
+static bool bzipRtAllZeros(void) {
+    unsigned char* in = makeRun(0, 50000);
+    bool ok = bzipBlockRoundTrip(in, 50000);
+    free(in);
+    return ok;
+}
+
+static bool bzipRtAll256(void) {
+    unsigned char in[512];
+    for (int i = 0; i < 512; i++) in[i] = (unsigned char)(i % 256);
+    return bzipBlockRoundTrip(in, 512);
+}
+
+static bool bzipRtRandom(void) {
+    unsigned int n = 50000;
+    unsigned char* in = malloc(n);
+    fillRandom(in, n);
+    bool ok = bzipBlockRoundTrip(in, n);
+    free(in);
+    return ok;
+}
+
+static bool bzipRtRandomRuns(void) {
+    unsigned int n = 50000;
+    unsigned char* in = malloc(n);
+    fillRandomRuns(in, n, 8, 300);
+    bool ok = bzipBlockRoundTrip(in, n);
+    free(in);
+    return ok;
+}
+
+static bool bzipRtManySmallSizes(void) {
+    unsigned char in[64];
+    for (unsigned int n = 1; n <= 64; n++) {
+        fillRandomRuns(in, n, 4, 10);
+        if (!bzipBlockRoundTrip(in, n)) {
+            printf("    (size %u failed)\n", n);
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool bzipDecTruncatedHeader(void) {
+    unsigned char shortIn[5] = {0};
+    unsigned char* decomp = NULL;
+    unsigned int decompN = 0;
+    EXPECT(bzip2DecompressBlock(shortIn, sizeof(shortIn), &decomp, &decompN) == corruptedData);
+    EXPECT(decomp == NULL && decompN == 0);
+    return true;
+}
+
+static bool bzipDecTruncatedPayload(void) {
+    const unsigned char in[] = "Testing payload truncation detection!";
+    unsigned char* comp = NULL;
+    unsigned int compN = 0;
+    EXPECT(bzip2CompressBlock((unsigned char*)in, sizeof(in), &comp, &compN) == success);
+
+    unsigned char* decomp = NULL;
+    unsigned int decompN = 0;
+    EXPECT(bzip2DecompressBlock(comp, sizeof(bzip2Header) + 2, &decomp, &decompN) == corruptedData);
+    EXPECT(decomp == NULL && decompN == 0);
+    free(comp);
+    return true;
+}
+
+// ============================================================================
 
 static const testEntry tests[] = {
     // RLE1encode
@@ -1168,6 +1399,31 @@ static const testEntry tests[] = {
     {"Pipeline: 50k random bytes", pipeRandom},
     {"Pipeline: 100k random runs", pipeRandomRuns},
     {"Pipeline: every size 1..64", pipeManySmallSizes},
+    // Huffman Encoding & Decoding
+    {"Huffman round trip: single byte", huffRtSingle},
+    {"Huffman round trip: 5k identical bytes", huffRtAllSame},
+    {"Huffman round trip: 10k zero bytes", huffRtAllZeros},
+    {"Huffman round trip: all 256 symbols", huffRtAll256},
+    {"Huffman round trip: skewed Fibonacci distribution", huffRtSkewedFibonacci},
+    {"Huffman round trip: 20k random bytes", huffRtRandom},
+    {"Huffman decode: zero expected size", huffDecZeroExpectedSize},
+    {"Huffman decode: truncated header -> corrupted", huffDecTruncatedHeader},
+    {"Huffman decode: depth exceeds max -> corrupted", huffDecDepthTooLarge},
+    {"Huffman decode: zero active symbols -> corrupted", huffDecZeroActiveSymbols},
+    // Full Bzip2 Block Compression & Decompression
+    {"Bzip2 block round trip: empty input", bzipRtEmpty},
+    {"Bzip2 block round trip: single byte", bzipRtSingleByte},
+    {"Bzip2 block round trip: two bytes", bzipRtTwoBytes},
+    {"Bzip2 block round trip: banana", bzipRtBanana},
+    {"Bzip2 block round trip: text paragraph", bzipRtText},
+    {"Bzip2 block round trip: 10k identical bytes", bzipRtAllSame},
+    {"Bzip2 block round trip: 50k zero bytes", bzipRtAllZeros},
+    {"Bzip2 block round trip: all 256 symbols", bzipRtAll256},
+    {"Bzip2 block round trip: 50k random bytes", bzipRtRandom},
+    {"Bzip2 block round trip: 50k random runs", bzipRtRandomRuns},
+    {"Bzip2 block round trip: sizes 1..64", bzipRtManySmallSizes},
+    {"Bzip2 decompress: truncated header -> corrupted", bzipDecTruncatedHeader},
+    {"Bzip2 decompress: truncated payload -> corrupted", bzipDecTruncatedPayload},
 };
 
 int main(void) {

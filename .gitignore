@@ -52,10 +52,11 @@ Mkfile.old
 dkms.conf
 
 
-
+*.bz2
 bzip2
 bwt
 testdata
 bwt-radix
 largetest.txt
 test.txt
+enwik9

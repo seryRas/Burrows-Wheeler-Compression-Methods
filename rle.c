@@ -24,7 +24,7 @@ errors RLE1encode(unsigned char* input, unsigned int inputSize,
     unsigned char val;
 
     val = input[index];
-    inUseMap[val / 8] |= (1 << (val % 8));
+    if (inUseMap) inUseMap[val / 8] |= (1 << (val % 8));
     (*output)[outputIndex++] = val;
 
     unsigned char lastChar = input[index++];
@@ -34,7 +34,7 @@ errors RLE1encode(unsigned char* input, unsigned int inputSize,
             count++;
             if (count == UCHAR_MAX + SEQ_MAXLEN) {
                 val = count - SEQ_MAXLEN;
-                inUseMap[val / 8] |= (1 << (val % 8));
+                if (inUseMap) inUseMap[val / 8] |= (1 << (val % 8));
                 (*output)[outputIndex++] = val;
                 count = 0;
                 index++;
@@ -47,7 +47,7 @@ errors RLE1encode(unsigned char* input, unsigned int inputSize,
         } else {
             if (count >= SEQ_MAXLEN) {
                 val = count - SEQ_MAXLEN;
-                inUseMap[val / 8] |= (1 << (val % 8));
+                if (inUseMap) inUseMap[val / 8] |= (1 << (val % 8));
                 (*output)[outputIndex++] = val;
             }
             lastChar = input[index];
@@ -55,13 +55,13 @@ errors RLE1encode(unsigned char* input, unsigned int inputSize,
         }
 
         val = input[index++];
-        inUseMap[val / 8] |= (1 << (val % 8));
+        if (inUseMap) inUseMap[val / 8] |= (1 << (val % 8));
         (*output)[outputIndex++] = val;
     }
 
     if (count >= SEQ_MAXLEN) {
         val = count - SEQ_MAXLEN;
-        inUseMap[val / 8] |= (1 << (val % 8));
+        if (inUseMap) inUseMap[val / 8] |= (1 << (val % 8));
         (*output)[outputIndex++] = val;
     }
 
@@ -136,7 +136,8 @@ errors RLE1decode(RLE1info* data, unsigned char** output,
 }
 
 errors RLE2encode(unsigned char* input, unsigned int inputSize,
-                  unsigned char** output, unsigned int* outputSize) {
+                  unsigned char** output, unsigned int* outputSize,
+                  unsigned int* freqMap) {
     if (inputSize > (UINT_MAX - 2) / 2) return sizeTooBig;
 
     *output = malloc(inputSize * 2 + 2);
@@ -158,16 +159,22 @@ errors RLE2encode(unsigned char* input, unsigned int inputSize,
                                           ? UCHAR_MAX
                                           : (unsigned char)zeroCount;
                 (*output)[outIdx++] = 0;
+                if (freqMap) freqMap[0]++;
                 (*output)[outIdx++] = chunk;
+                if (freqMap) freqMap[chunk]++;
                 zeroCount -= chunk;
             }
         } else {
-            (*output)[outIdx++] = input[inIdx++];
+            unsigned char val = input[inIdx++];
+            (*output)[outIdx++] = val;
+            if (freqMap) freqMap[val]++;
         }
     }
 
     (*output)[outIdx++] = 0;
+    if (freqMap) freqMap[0]++;
     (*output)[outIdx++] = 0;
+    if (freqMap) freqMap[0]++;
 
     *outputSize = outIdx;
     return success;

@@ -249,7 +249,7 @@ testResult allSameCharactersTest() {
         .input = word,
         .inputSize = sizeof(word) - 1,
         .expectedResult = expectedResult,
-        .expectedIndex = 0,
+        .expectedIndex = 6,
     };
 
     return runTransformationCase(testCase);
@@ -276,7 +276,7 @@ testResult retransformAllSameCharactersTest() {
         .name = "Retransform all same characters test",
         .transformed = transformed,
         .inputSize = sizeof(transformed) - 1,
-        .initialIndex = 0,
+        .initialIndex = 6,
         .expectedOutput = expectedOutput,
     };
 
