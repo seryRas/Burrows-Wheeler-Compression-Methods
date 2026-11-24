@@ -55,6 +55,8 @@ dkms.conf
 *.bz2
 bzip2
 bwt
+bwt-test
+bzip2-test
 testdata
 bwt-radix
 largetest.txt

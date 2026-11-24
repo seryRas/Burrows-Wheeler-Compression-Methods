@@ -1,7 +1,9 @@
 #include "BWT.h"
+
 #include <assert.h>
 
-static inline void freeAll(void* p1, void* p2, void* p3, void* p4, void* p5, void* p6, void* p7, void* p8) {
+static inline void freeAll(void* p1, void* p2, void* p3, void* p4, void* p5,
+                           void* p6, void* p7, void* p8) {
     free(p1);
     free(p2);
     free(p3);
@@ -12,10 +14,10 @@ static inline void freeAll(void* p1, void* p2, void* p3, void* p4, void* p5, voi
     free(p8);
 }
 
-errors recursiveSais(unsigned int* input, RecSaisOut* output,
-                     unsigned int alphabetSize);
+errors recursiveSais(unsigned int* input, unsigned int* suffixArr,
+                     unsigned int inputSize, unsigned int alphabetSize);
 
-#define BITVECTOR_BYTE_COUNT(bitCount) (((bitCount) + 7) / 8)
+#define BITVECTOR_BYTE_COUNT(bitCount) (((size_t)(bitCount) + 7) / 8)
 
 static inline bool bitvectorGet(const unsigned char* bitvector,
                                 unsigned int index) {
@@ -32,6 +34,14 @@ static inline void bitvectorSet(unsigned char* bitvector, unsigned int index,
     }
 }
 
+// index is LMS when it is S-type after L-type so index 0 cant be LMS
+// sentinel at the end is S-type after L-type so its always LMS
+// no two LMS can be next to each other so there is at most half of them
+static inline bool isLms(const unsigned char* typedOut, unsigned int index) {
+    return index > 0 && bitvectorGet(typedOut, index) == S_TYPE &&
+           bitvectorGet(typedOut, index - 1) == L_TYPE;
+}
+
 static inline void fillBucketBounds(unsigned int* arr[2], unsigned int* counts,
                                     unsigned int alphabetSize) {
     unsigned int count = 1;
@@ -42,18 +52,33 @@ static inline void fillBucketBounds(unsigned int* arr[2], unsigned int* counts,
     }
 }
 
+// starts from 0 because reduced string already has 0 as sentinel at the end
+static inline void fillBucketBoundsRec(unsigned int* arr[2],
+                                       unsigned int* counts,
+                                       unsigned int alphabetSize) {
+    unsigned int count = 0;
+    for (unsigned int i = 0; i < alphabetSize; i++) {
+        arr[BEGIN][i] = count;
+        count += counts[i];
+        arr[END][i] = count - 1;
+    }
+}
+
 // ===================== Recursive (unsigned int) SA-IS =====================
 
+// last element is sentinel 0 so its S-type and the one before is L-type
 void sortTypesRec(unsigned int inputSize, unsigned int* input,
-                  unsigned char* typedOutput, unsigned int* charCountArr,
-                  LmsArray* lmsIndexes) {
+                  unsigned char* typedOutput, unsigned int* charCountArr) {
     if (inputSize == 0) return;
 
-    bitvectorSet(typedOutput, inputSize - 1, L_TYPE);
+    bitvectorSet(typedOutput, inputSize - 1, S_TYPE);
     charCountArr[input[inputSize - 1]]++;
-    lmsIndexes->array[lmsIndexes->indexAmount++] = inputSize;
+    if (inputSize < 2) return;
 
-    unsigned int i = inputSize - 1;
+    bitvectorSet(typedOutput, inputSize - 2, L_TYPE);
+    charCountArr[input[inputSize - 2]]++;
+
+    unsigned int i = inputSize - 2;
     while (i-- > 0) {
         if (input[i] == input[i + 1]) {
             bitvectorSet(typedOutput, i, bitvectorGet(typedOutput, i + 1));
@@ -61,21 +86,17 @@ void sortTypesRec(unsigned int inputSize, unsigned int* input,
             bitvectorSet(typedOutput, i, input[i] < input[i + 1]);
         }
 
-        if (bitvectorGet(typedOutput, i) == L_TYPE &&
-            bitvectorGet(typedOutput, i + 1) == S_TYPE) {
-            lmsIndexes->array[lmsIndexes->indexAmount++] = i + 1;
-        }
-
         charCountArr[input[i]]++;
     }
 }
 
-static inline void fillLmsRec(LmsArray* indexes, unsigned int* bucketEnd,
+static inline void fillLmsRec(unsigned char* typedOut, unsigned int* bucketEnd,
                               unsigned int* suffArr, unsigned int inputSize,
                               unsigned int* input) {
-    suffArr[0] = inputSize;
-    for (unsigned int i = 1; i < indexes->indexAmount; i++) {
-        suffArr[bucketEnd[input[indexes->array[i]]]--] = indexes->array[i];
+    for (unsigned int i = 1; i < inputSize; i++) {
+        if (isLms(typedOut, i)) {
+            suffArr[bucketEnd[input[i]]--] = i;
+        }
     }
 }
 
@@ -88,7 +109,7 @@ errors lInductionSortRec(unsigned int* suffixArray,
     memcpy(bucketBeginCopy, bucketBounds[BEGIN],
            sizeof(unsigned int) * alphabetSize);
     unsigned int indexBefore;
-    for (unsigned int i = 0; i < inputSize + 1; i++) {
+    for (unsigned int i = 0; i < inputSize; i++) {
         if (suffixArray[i] == EMPTY_IDX || suffixArray[i] == 0) continue;
         indexBefore = suffixArray[i] - 1;
         assert(indexBefore != EMPTY_IDX);
@@ -109,7 +130,7 @@ errors sInductionSortRec(unsigned int* suffixArray,
     memcpy(bucketEndCopy, bucketBounds[END],
            sizeof(unsigned int) * alphabetSize);
     unsigned int indexBefore;
-    unsigned int i = inputSize + 1;
+    unsigned int i = inputSize;
     while ((i--) > 0) {
         if (suffixArray[i] == EMPTY_IDX || suffixArray[i] == 0) continue;
         indexBefore = suffixArray[i] - 1;
@@ -145,91 +166,81 @@ bool compareLmsSubstringsRec(unsigned int* input, unsigned char* typedIdx,
     }
 }
 
+// packs LMS to the start of sufArr and writes names at lmsCount + index/2
+// index/2 cant collide because LMS arent adjacent and stays inside sufArr
+// if duplicates exist packs reduced string to the right end and runs recursiveSais in place
 errors findSameSubstringsRec(unsigned int* input, unsigned int* sufArr,
                              unsigned char* typedOut, unsigned int len,
-                             LmsArray* lmsArr, unsigned int** finalOrder) {
-    unsigned int index;
+                             unsigned int* lmsCountOut) {
+    unsigned int lmsCount = 0;
+    for (unsigned int i = 0; i < len; i++) {
+        if (isLms(typedOut, sufArr[i])) {
+            sufArr[lmsCount++] = sufArr[i];
+        }
+    }
+
+    for (unsigned int i = lmsCount; i < len; i++) sufArr[i] = EMPTY_IDX;
+
     unsigned int lastLmsIndex = EMPTY_IDX;
     unsigned int name = 0;
-    unsigned int* nameArr = malloc(sizeof(unsigned int) * (len + 1));
-    if (!nameArr) return mallocErr;
-    unsigned int savedNames = 0;
-    unsigned int* originalLmsIndexes =
-        malloc(sizeof(unsigned int) * (lmsArr->indexAmount > 0 ? lmsArr->indexAmount : 1));
-    if (!originalLmsIndexes) {
-        freeAll(nameArr, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-        return mallocErr;
-    }
-    for (unsigned int i = 0; i <= len; i++) {
-        index = sufArr[i];
-        if (index == len) {
-            originalLmsIndexes[savedNames++] = index;
-            nameArr[index] = name++;
-            continue;
-        }
-        if (bitvectorGet(typedOut, index) != S_TYPE || index == 0) continue;
-        if (bitvectorGet(typedOut, index - 1) != L_TYPE) continue;
+    for (unsigned int i = 0; i < lmsCount; i++) {
+        unsigned int index = sufArr[i];
         if (lastLmsIndex == EMPTY_IDX) {
-            originalLmsIndexes[savedNames++] = index;
-            nameArr[index] = name;
             lastLmsIndex = index;
         } else {
-            if (compareLmsSubstringsRec(input, typedOut, lastLmsIndex, index,
-                                        len)) {
-                nameArr[index] = name;
-            } else {
-                nameArr[index] = ++name;
+            if (!compareLmsSubstringsRec(input, typedOut, lastLmsIndex, index,
+                                         len - 1)) {
+                name++;
             }
-            originalLmsIndexes[savedNames++] = index;
             lastLmsIndex = index;
         }
+        sufArr[lmsCount + (index / 2)] = name;
     }
 
-    if (name + 1 < savedNames) {
-        RecSaisOut recOut = {.size = savedNames};
-        unsigned int i = lmsArr->indexAmount;
+    if (name + 1 < lmsCount) {
+        unsigned int dest = len - 1;
+        for (unsigned int i = len; i-- > lmsCount;) {
+            if (sufArr[i] != EMPTY_IDX) {
+                sufArr[dest--] = sufArr[i];
+            }
+        }
+        unsigned int* reducedStr = sufArr + len - lmsCount;
+
+        errors _err2 = recursiveSais(reducedStr, sufArr, lmsCount, name + 1);
+        if (_err2 != success) return _err2;
+
         unsigned int j = 0;
-
-        while ((i--) > 0) {
-            originalLmsIndexes[j++] = nameArr[lmsArr->array[i]];
+        for (unsigned int i = 1; i < len; i++) {
+            if (isLms(typedOut, i)) {
+                reducedStr[j++] = i;
+            }
         }
-        if (!(recOut.data = malloc(sizeof(unsigned int) * savedNames))) {
-            freeAll(nameArr, originalLmsIndexes, NULL, NULL, NULL, NULL, NULL, NULL);
-            return mallocErr;
+        for (unsigned int k = 0; k < lmsCount; k++) {
+            sufArr[k] = reducedStr[sufArr[k]];
         }
-        errors _err2 = recursiveSais(originalLmsIndexes, &recOut, name + 1);
-        if (_err2 != success) {
-            freeAll(nameArr, recOut.data, originalLmsIndexes, NULL, NULL, NULL, NULL, NULL);
-            return _err2;
-        }
-
-        for (unsigned int k = 0; k < lmsArr->indexAmount; k++) {
-            unsigned int k_idx = lmsArr->indexAmount - 1 - recOut.data[k];
-            originalLmsIndexes[k] = lmsArr->array[k_idx];
-        }
-        freeAll(recOut.data, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
     }
 
-    *finalOrder = originalLmsIndexes;
-    freeAll(nameArr, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    *lmsCountOut = lmsCount;
     return success;
 }
 
+// moves sorted LMS from start of sufArr to bucket ends from right to left
+// works in place because bucketEnd is always >= i so it never overwrites unread values
 static inline void finalLmsFillRec(unsigned int* input,
-                                   unsigned int* orderedLmsIndexes,
                                    unsigned int indexAmount,
                                    unsigned int* bucketEnd,
                                    unsigned int* sufArr) {
-    sufArr[0] = orderedLmsIndexes[0];
-    for (unsigned int i = indexAmount - 1; i > 0; i--) {
-        sufArr[bucketEnd[input[orderedLmsIndexes[i]]]--] = orderedLmsIndexes[i];
+    for (unsigned int i = indexAmount; i-- > 0;) {
+        unsigned int index = sufArr[i];
+        sufArr[i] = EMPTY_IDX;
+        sufArr[bucketEnd[input[index]]--] = index;
     }
 }
 
-errors recursiveSais(unsigned int* input, RecSaisOut* output,
-                     unsigned int alphabetSize) {
+errors recursiveSais(unsigned int* input, unsigned int* suffixArr,
+                     unsigned int inputSize, unsigned int alphabetSize) {
     unsigned char* typedOut =
-        calloc(BITVECTOR_BYTE_COUNT(output->size), sizeof(unsigned char));
+        calloc(BITVECTOR_BYTE_COUNT(inputSize), sizeof(unsigned char));
     if (!typedOut) return mallocErr;
 
     unsigned int* charCounts = calloc(alphabetSize, sizeof(unsigned int));
@@ -238,90 +249,83 @@ errors recursiveSais(unsigned int* input, RecSaisOut* output,
         return mallocErr;
     }
 
-    LmsArray lmsIndexes = {.indexAmount = 0};
-    if (!(lmsIndexes.array =
-              malloc(sizeof(unsigned int) * ((output->size / 2) + 2)))) {
-        freeAll(typedOut, charCounts, NULL, NULL, NULL, NULL, NULL, NULL);
-        return mallocErr;
-    }
-
-    sortTypesRec(output->size, input, typedOut, charCounts, &lmsIndexes);
+    sortTypesRec(inputSize, input, typedOut, charCounts);
 
     unsigned int* bucketBounds[2];
     bucketBounds[BEGIN] = malloc(sizeof(unsigned int) * alphabetSize);
     if (!bucketBounds[BEGIN]) {
-        freeAll(typedOut, charCounts, lmsIndexes.array, NULL, NULL, NULL, NULL, NULL);
+        freeAll(typedOut, charCounts, NULL, NULL, NULL, NULL, NULL, NULL);
         return mallocErr;
     }
     bucketBounds[END] = malloc(sizeof(unsigned int) * alphabetSize);
     if (!bucketBounds[END]) {
-        freeAll(typedOut, charCounts, lmsIndexes.array, bucketBounds[BEGIN], NULL, NULL, NULL, NULL);
+        freeAll(typedOut, charCounts, bucketBounds[BEGIN], NULL, NULL, NULL,
+                NULL, NULL);
         return mallocErr;
     }
-    fillBucketBounds(bucketBounds, charCounts, alphabetSize);
+    fillBucketBoundsRec(bucketBounds, charCounts, alphabetSize);
 
-    unsigned int* suffixArr = malloc((output->size + 1) * sizeof(unsigned int));
-    if (!suffixArr) {
-        freeAll(typedOut, charCounts, lmsIndexes.array, bucketBounds[BEGIN], bucketBounds[END], NULL, NULL, NULL);
-        return mallocErr;
-    }
-    for (unsigned int _idx = 0; _idx < (output->size + 1); _idx++) suffixArr[_idx] = EMPTY_IDX;
+    for (unsigned int _idx = 0; _idx < inputSize; _idx++)
+        suffixArr[_idx] = EMPTY_IDX;
 
     unsigned int* bucketEndCopy = malloc(sizeof(unsigned int) * alphabetSize);
     if (!bucketEndCopy) {
-        freeAll(typedOut, charCounts, lmsIndexes.array, bucketBounds[BEGIN], bucketBounds[END], suffixArr, NULL, NULL);
+        freeAll(typedOut, charCounts, bucketBounds[BEGIN], bucketBounds[END],
+                NULL, NULL, NULL, NULL);
         return mallocErr;
     }
     memcpy(bucketEndCopy, bucketBounds[END],
            sizeof(unsigned int) * alphabetSize);
 
-    fillLmsRec(&lmsIndexes, bucketEndCopy, suffixArr, output->size, input);
+    fillLmsRec(typedOut, bucketEndCopy, suffixArr, inputSize, input);
 
-    if (lInductionSortRec(suffixArr, bucketBounds, typedOut, input,
-                          output->size, alphabetSize) != success ||
-        sInductionSortRec(suffixArr, bucketBounds, typedOut, input,
-                          output->size, alphabetSize) != success) {
-        freeAll(typedOut, charCounts, lmsIndexes.array, suffixArr, bucketBounds[BEGIN], bucketBounds[END], bucketEndCopy, NULL);
+    if (lInductionSortRec(suffixArr, bucketBounds, typedOut, input, inputSize,
+                          alphabetSize) != success ||
+        sInductionSortRec(suffixArr, bucketBounds, typedOut, input, inputSize,
+                          alphabetSize) != success) {
+        freeAll(typedOut, charCounts, bucketBounds[BEGIN], bucketBounds[END],
+                bucketEndCopy, NULL, NULL, NULL);
         return mallocErr;
     }
-    unsigned int* finalOrderLmsIndexes;
-    errors _err1 = findSameSubstringsRec(input, suffixArr, typedOut, output->size,
-                              &lmsIndexes, &finalOrderLmsIndexes);
+
+    unsigned int lmsCount = 0;
+    errors _err1 = findSameSubstringsRec(input, suffixArr, typedOut, inputSize,
+                                         &lmsCount);
     if (_err1 != success) {
-        freeAll(typedOut, charCounts, lmsIndexes.array, suffixArr, bucketBounds[BEGIN], bucketBounds[END], bucketEndCopy, NULL);
+        freeAll(typedOut, charCounts, bucketBounds[BEGIN], bucketBounds[END],
+                bucketEndCopy, NULL, NULL, NULL);
         return _err1;
     }
 
-    for (unsigned int _idx = 0; _idx < (output->size + 1); _idx++) suffixArr[_idx] = EMPTY_IDX;
+    for (unsigned int _idx = lmsCount; _idx < inputSize; _idx++)
+        suffixArr[_idx] = EMPTY_IDX;
     memcpy(bucketEndCopy, bucketBounds[END],
            sizeof(unsigned int) * alphabetSize);
-    finalLmsFillRec(input, finalOrderLmsIndexes, lmsIndexes.indexAmount,
-                    bucketEndCopy, suffixArr);
+    finalLmsFillRec(input, lmsCount, bucketEndCopy, suffixArr);
 
-    if (lInductionSortRec(suffixArr, bucketBounds, typedOut, input,
-                          output->size, alphabetSize) != success ||
-        sInductionSortRec(suffixArr, bucketBounds, typedOut, input,
-                          output->size, alphabetSize) != success) {
-        freeAll(typedOut, charCounts, lmsIndexes.array, suffixArr, bucketBounds[BEGIN], bucketBounds[END], bucketEndCopy, finalOrderLmsIndexes);
+    if (lInductionSortRec(suffixArr, bucketBounds, typedOut, input, inputSize,
+                          alphabetSize) != success ||
+        sInductionSortRec(suffixArr, bucketBounds, typedOut, input, inputSize,
+                          alphabetSize) != success) {
+        freeAll(typedOut, charCounts, bucketBounds[BEGIN], bucketBounds[END],
+                bucketEndCopy, NULL, NULL, NULL);
         return mallocErr;
     }
 
-    memcpy(output->data, suffixArr + 1, sizeof(unsigned int) * output->size);
-    freeAll(typedOut, charCounts, lmsIndexes.array, suffixArr, bucketBounds[BEGIN], bucketBounds[END], bucketEndCopy, finalOrderLmsIndexes);
+    freeAll(typedOut, charCounts, bucketBounds[BEGIN], bucketBounds[END],
+            bucketEndCopy, NULL, NULL, NULL);
 
     return success;
 }
 
 // true == S-type    false == L-type
-// sorts types (typedOutput[i] = type of i char)
+// sorts types (typedOutput[i] = type of i char, sentinel at inputSize)
 // counts amount of times there is value (charCountArr[i] = amount of ASCII[i])
-// makes array of LMS indexes (lmsIndexes->indexAmount - number of indexes)
 int sortTypes(unsigned int inputSize, unsigned char* input,
-              unsigned char* typedOutput, unsigned int* charCountArr,
-              LmsArray* lmsIndexes) {
+              unsigned char* typedOutput, unsigned int* charCountArr) {
+    bitvectorSet(typedOutput, inputSize, S_TYPE);
     bitvectorSet(typedOutput, inputSize - 1, L_TYPE);
     charCountArr[input[inputSize - 1]]++;
-    lmsIndexes->array[lmsIndexes->indexAmount++] = inputSize;
 
     unsigned int i = inputSize - 1;
     while (i-- > 0) {
@@ -331,22 +335,19 @@ int sortTypes(unsigned int inputSize, unsigned char* input,
             bitvectorSet(typedOutput, i, input[i] < input[i + 1]);
         }
 
-        if (bitvectorGet(typedOutput, i) == L_TYPE &&
-            bitvectorGet(typedOutput, i + 1) == S_TYPE) {
-            lmsIndexes->array[lmsIndexes->indexAmount++] = i + 1;
-        }
-
         if ((++charCountArr[input[i]]) == inputSize) return ALL_SAME_INPUT;
     }
     return EXIT_SUCCESS;
 }
 
-static inline void fillLms(LmsArray* indexes, unsigned int* bucketEnd,
+static inline void fillLms(unsigned char* typedOut, unsigned int* bucketEnd,
                            unsigned int* suffArr, unsigned int inputSize,
                            unsigned char* input) {
     suffArr[0] = inputSize;
-    for (unsigned int i = 1; i < indexes->indexAmount; i++) {
-        suffArr[bucketEnd[input[indexes->array[i]]]--] = indexes->array[i];
+    for (unsigned int i = 1; i < inputSize; i++) {
+        if (isLms(typedOut, i)) {
+            suffArr[bucketEnd[input[i]]--] = i;
+        }
     }
 }
 
@@ -406,90 +407,74 @@ bool compareLmsSubstrings(unsigned char* input, unsigned char* typedIdx,
     }
 }
 
+// packs LMS to the start of sufArr and writes names at lmsCount + index/2
+// index/2 cant collide because LMS arent adjacent and stays inside sufArr
+// if duplicates exist packs reduced string to the right end and runs recursiveSais in place
 errors findSameSubstrings(unsigned char* input, unsigned int* sufArr,
                           unsigned char* typedOut, unsigned int len,
-                          LmsArray* lmsArr, unsigned int** finalOrder) {
-    unsigned int index;
+                          unsigned int* lmsCountOut) {
+    unsigned int saLen = len + 1;
+
+    unsigned int lmsCount = 0;
+    for (unsigned int i = 0; i < saLen; i++) {
+        if (isLms(typedOut, sufArr[i])) {
+            sufArr[lmsCount++] = sufArr[i];
+        }
+    }
+
+    for (unsigned int i = lmsCount; i < saLen; i++) sufArr[i] = EMPTY_IDX;
+
     unsigned int lastLmsIndex = EMPTY_IDX;
     unsigned int name = 0;
-    unsigned int* nameArr = malloc(sizeof(unsigned int) * (len + 1));
-    if (!nameArr) return mallocErr;
-    unsigned int* originalLmsIndexes =
-        malloc(sizeof(unsigned int) * (lmsArr->indexAmount > 0 ? lmsArr->indexAmount : 1));
-    if (!originalLmsIndexes) {
-        freeAll(nameArr, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-        return mallocErr;
-    }
-    unsigned int nameAmount = 0;
-    for (unsigned int i = 0; i <= len; i++) {
-        index = sufArr[i];
-        if (index == len) {
-            originalLmsIndexes[nameAmount++] = index;
-            nameArr[index] = name++;
-            continue;
-        }
-        if (bitvectorGet(typedOut, index) != S_TYPE || index == 0) continue;
-        if (bitvectorGet(typedOut, index - 1) != L_TYPE) continue;
+    for (unsigned int i = 0; i < lmsCount; i++) {
+        unsigned int index = sufArr[i];
         if (lastLmsIndex == EMPTY_IDX) {
-            nameArr[index] = name;
-            originalLmsIndexes[nameAmount++] = index;
             lastLmsIndex = index;
         } else {
-            if (compareLmsSubstrings(input, typedOut, lastLmsIndex, index,
-                                     len)) {
-                nameArr[index] = name;
-            } else {
-                nameArr[index] = ++name;
+            if (!compareLmsSubstrings(input, typedOut, lastLmsIndex, index,
+                                      len)) {
+                name++;
             }
             lastLmsIndex = index;
-            originalLmsIndexes[nameAmount++] = index;
+        }
+        sufArr[lmsCount + (index / 2)] = name;
+    }
+
+    if (name + 1 < lmsCount) {
+        unsigned int dest = saLen - 1;
+        for (unsigned int i = saLen; i-- > lmsCount;) {
+            if (sufArr[i] != EMPTY_IDX) {
+                sufArr[dest--] = sufArr[i];
+            }
+        }
+        unsigned int* reducedStr = sufArr + saLen - lmsCount;
+
+        errors _err2 = recursiveSais(reducedStr, sufArr, lmsCount, name + 1);
+        if (_err2 != success) return _err2;
+
+        unsigned int j = 0;
+        for (unsigned int i = 1; i < saLen; i++) {
+            if (isLms(typedOut, i)) {
+                reducedStr[j++] = i;
+            }
+        }
+        for (unsigned int k = 0; k < lmsCount; k++) {
+            sufArr[k] = reducedStr[sufArr[k]];
         }
     }
 
-    if (name + 1 < nameAmount) {
-        RecSaisOut out = {.size = nameAmount};
-        unsigned int* denseArr =
-            malloc(sizeof(unsigned int) * (lmsArr->indexAmount));
-        if (!denseArr) {
-            freeAll(nameArr, originalLmsIndexes, NULL, NULL, NULL, NULL, NULL, NULL);
-            return mallocErr;
-        }
-        unsigned int j = lmsArr->indexAmount;
-        unsigned int i = 0;
-        while ((j--) > 0) {
-            denseArr[i++] = nameArr[lmsArr->array[j]];
-        }
-
-        if (!(out.data = malloc(sizeof(unsigned int) * nameAmount))) {
-            freeAll(denseArr, nameArr, originalLmsIndexes, NULL, NULL, NULL, NULL, NULL);
-            return mallocErr;
-        }
-        errors _err2 = recursiveSais(denseArr, &out, name + 1);
-        if (_err2 != success) {
-            freeAll(out.data, denseArr, nameArr, originalLmsIndexes, NULL, NULL, NULL, NULL);
-            return _err2;
-        }
-
-        for (unsigned int k = 0; k < lmsArr->indexAmount; k++) {
-            originalLmsIndexes[k] =
-                lmsArr->array[lmsArr->indexAmount - 1 - out.data[k]];
-        }
-        freeAll(denseArr, out.data, NULL, NULL, NULL, NULL, NULL, NULL);
-    }
-
-    *finalOrder = originalLmsIndexes;
-
-    freeAll(nameArr, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    *lmsCountOut = lmsCount;
     return success;
 }
 
-static inline void finalLmsFill(unsigned char* input,
-                                unsigned int* orderedLmsIndexes,
-                                unsigned int indexAmount,
+// moves sorted LMS from start of sufArr to bucket ends from right to left
+// sufArr[0] is sentinel so stops at 1 and bucketEnd is always >= i
+static inline void finalLmsFill(unsigned char* input, unsigned int indexAmount,
                                 unsigned int* bucketEnd, unsigned int* sufArr) {
-    sufArr[0] = orderedLmsIndexes[0];
-    for (unsigned int i = indexAmount - 1; i > 0; i--) {
-        sufArr[bucketEnd[input[orderedLmsIndexes[i]]]--] = orderedLmsIndexes[i];
+    for (unsigned int i = indexAmount; i-- > 1;) {
+        unsigned int index = sufArr[i];
+        sufArr[i] = EMPTY_IDX;
+        sufArr[bucketEnd[input[index]]--] = index;
     }
 }
 
@@ -498,27 +483,26 @@ errors bwtTransform(unsigned char* input, unsigned int inputSize,
     if (inputSize == 0) return emptyInput;
     if (inputSize >= UINT_MAX) return sizeTooBig;
 
+    unsigned int saLen = inputSize + 1;
     unsigned char* typedOut =
-        calloc(BITVECTOR_BYTE_COUNT(inputSize), sizeof(unsigned char));
-    unsigned int* lmsArray = malloc(sizeof(unsigned int) * ((inputSize / 2) + 2));
-    unsigned int* suffixArr = malloc((inputSize + 1) * sizeof(unsigned int));
+        calloc(BITVECTOR_BYTE_COUNT(saLen), sizeof(unsigned char));
+    unsigned int* suffixArr = malloc((size_t)saLen * sizeof(unsigned int));
 
-    if (!typedOut || !lmsArray || !suffixArr) {
-        freeAll(typedOut, lmsArray, suffixArr, NULL, NULL, NULL, NULL, NULL);
+    if (!typedOut || !suffixArr) {
+        freeAll(typedOut, suffixArr, NULL, NULL, NULL, NULL, NULL, NULL);
         return mallocErr;
     }
 
-    memset(typedOut, 0, BITVECTOR_BYTE_COUNT(inputSize));
-    for (unsigned int _idx = 0; _idx < (inputSize + 1); _idx++) suffixArr[_idx] = EMPTY_IDX;
+    memset(typedOut, 0, BITVECTOR_BYTE_COUNT(saLen));
+    for (unsigned int _idx = 0; _idx < saLen; _idx++)
+        suffixArr[_idx] = EMPTY_IDX;
 
-    LmsArray lmsIndexes = {.indexAmount = 0, .array = lmsArray};
     unsigned int charCounts[AMOUNT_OF_VALUES] = {0};
 
-    if (sortTypes(inputSize, input, typedOut, charCounts, &lmsIndexes) ==
-        ALL_SAME_INPUT) {
+    if (sortTypes(inputSize, input, typedOut, charCounts) == ALL_SAME_INPUT) {
         *bwtIndex = inputSize;
         memcpy(output, input, inputSize);
-        freeAll(typedOut, lmsArray, suffixArr, NULL, NULL, NULL, NULL, NULL);
+        freeAll(typedOut, suffixArr, NULL, NULL, NULL, NULL, NULL, NULL);
         return success;
     }
 
@@ -531,28 +515,27 @@ errors bwtTransform(unsigned char* input, unsigned int inputSize,
     memcpy(bucketEndCopy, bucketBounds[END],
            sizeof(unsigned int) * AMOUNT_OF_VALUES);
 
-    fillLms(&lmsIndexes, bucketEndCopy, suffixArr, inputSize, input);
+    fillLms(typedOut, bucketEndCopy, suffixArr, inputSize, input);
 
     lInductionSort(suffixArr, bucketBounds, typedOut, input, inputSize);
     sInductionSort(suffixArr, bucketBounds, typedOut, input, inputSize);
 
-    unsigned int* finalOrderLmsIndexes;
-    errors _err3 = findSameSubstrings(input, suffixArr, typedOut, inputSize, &lmsIndexes,
-                           &finalOrderLmsIndexes);
+    unsigned int lmsCount = 0;
+    errors _err3 =
+        findSameSubstrings(input, suffixArr, typedOut, inputSize, &lmsCount);
     if (_err3 != success) {
-        freeAll(typedOut, lmsArray, suffixArr, NULL, NULL, NULL, NULL, NULL);
+        freeAll(typedOut, suffixArr, NULL, NULL, NULL, NULL, NULL, NULL);
         return _err3;
     }
 
-    for (unsigned int _idx = 0; _idx < (inputSize + 1); _idx++) suffixArr[_idx] = EMPTY_IDX;
+    for (unsigned int _idx = lmsCount; _idx < saLen; _idx++)
+        suffixArr[_idx] = EMPTY_IDX;
     memcpy(bucketEndCopy, bucketBounds[END],
            sizeof(unsigned int) * AMOUNT_OF_VALUES);
-    finalLmsFill(input, finalOrderLmsIndexes, lmsIndexes.indexAmount,
-                 bucketEndCopy, suffixArr);
+    finalLmsFill(input, lmsCount, bucketEndCopy, suffixArr);
 
     lInductionSort(suffixArr, bucketBounds, typedOut, input, inputSize);
     sInductionSort(suffixArr, bucketBounds, typedOut, input, inputSize);
-    freeAll(finalOrderLmsIndexes, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
     unsigned int packedIdx = 0;
     for (unsigned int i = 0; i <= inputSize; i++) {
@@ -563,7 +546,7 @@ errors bwtTransform(unsigned char* input, unsigned int inputSize,
         }
     }
 
-    freeAll(typedOut, lmsArray, suffixArr, NULL, NULL, NULL, NULL, NULL);
+    freeAll(typedOut, suffixArr, NULL, NULL, NULL, NULL, NULL, NULL);
     return success;
 }
 

@@ -371,7 +371,8 @@ testResult roundTripAscendingTest() {
 testResult roundTripAlternatingTest() {
     unsigned int sz = 300;
     unsigned char* buf = malloc(sz);
-    for (unsigned int i = 0; i < sz; i++) buf[i] = 'a' + (i % 3);  // abcabc...
+    for (unsigned int i = 0; i < sz; i++)
+        buf[i] = (unsigned char)('a' + (i % 3));  // abcabc...
     roundTripCase testCase = {
         .name = "Round-trip alternating (abcabc...) test",
         .input = buf,
@@ -435,6 +436,456 @@ testResult retransformOutOfBoundsIndexTest() {
     return pass;
 }
 
+// ============================================================================
+//  Naive sentinel-BWT reference oracle & targeted RAM-optimised SA-IS tests
+// ============================================================================
+
+static const unsigned char* gOracleInput = NULL;
+static unsigned int gOracleLen = 0;
+
+static int oracleSuffixCmp(const void* a, const void* b) {
+    unsigned int i = *(const unsigned int*)a;
+    unsigned int j = *(const unsigned int*)b;
+    if (i == j) return 0;
+    while (i < gOracleLen && j < gOracleLen) {
+        if (gOracleInput[i] != gOracleInput[j]) {
+            return (gOracleInput[i] < gOracleInput[j]) ? -1 : 1;
+        }
+        i++;
+        j++;
+    }
+    // Shorter suffix reaches virtual sentinel first and is strictly smaller
+    return (i == gOracleLen) ? -1 : 1;
+}
+
+static bool computeNaiveBwt(const unsigned char* input, unsigned int inputSize,
+                            unsigned char* expectedOut,
+                            unsigned int* expectedIdx) {
+    unsigned int saLen = inputSize + 1;
+    unsigned int* sa = malloc(sizeof(unsigned int) * (size_t)saLen);
+    if (!sa) return false;
+    for (unsigned int i = 0; i < saLen; i++) sa[i] = i;
+
+    gOracleInput = input;
+    gOracleLen = inputSize;
+    qsort(sa, saLen, sizeof(unsigned int), oracleSuffixCmp);
+
+    unsigned int outPos = 0;
+    for (unsigned int i = 0; i < saLen; i++) {
+        if (sa[i] == 0) {
+            *expectedIdx = i;
+        } else {
+            expectedOut[outPos++] = input[sa[i] - 1];
+        }
+    }
+    free(sa);
+    return true;
+}
+
+static testResult verifyAgainstOracle(const char* name,
+                                      const unsigned char* input,
+                                      unsigned int inputSize, bool silent) {
+    unsigned char* expectedBwt = malloc(inputSize);
+    unsigned char* actualBwt = malloc(inputSize);
+    unsigned char* restored = malloc(inputSize);
+    unsigned char* inputCopy = malloc(inputSize);
+    if (!expectedBwt || !actualBwt || !restored || !inputCopy) {
+        free(expectedBwt);
+        free(actualBwt);
+        free(restored);
+        free(inputCopy);
+        return error;
+    }
+    memcpy(inputCopy, input, inputSize);
+
+    unsigned int expectedIdx = 0;
+    if (!computeNaiveBwt(inputCopy, inputSize, expectedBwt, &expectedIdx)) {
+        free(expectedBwt);
+        free(actualBwt);
+        free(restored);
+        free(inputCopy);
+        return error;
+    }
+
+    unsigned int actualIdx = 0;
+    if (bwtTransform(inputCopy, inputSize, actualBwt, &actualIdx) != success) {
+        fprintf(stdout, "FAIL: %s (bwtTransform returned error)\n", name);
+        free(expectedBwt);
+        free(actualBwt);
+        free(restored);
+        free(inputCopy);
+        return fail;
+    }
+
+    if (actualIdx != expectedIdx ||
+        memcmp(expectedBwt, actualBwt, inputSize) != 0) {
+        fprintf(stdout,
+                "FAIL: %s (BWT mismatch: idx got %u expected %u, size %u)\n",
+                name, actualIdx, expectedIdx, inputSize);
+        free(expectedBwt);
+        free(actualBwt);
+        free(restored);
+        free(inputCopy);
+        return fail;
+    }
+
+    if (bwtRetransform(actualBwt, inputSize, restored, actualIdx) != success ||
+        memcmp(inputCopy, restored, inputSize) != 0) {
+        fprintf(stdout, "FAIL: %s (bwtRetransform mismatch, size %u)\n", name,
+                inputSize);
+        free(expectedBwt);
+        free(actualBwt);
+        free(restored);
+        free(inputCopy);
+        return fail;
+    }
+
+    if (!silent) fprintf(stdout, "PASS: %s\n", name);
+    free(expectedBwt);
+    free(actualBwt);
+    free(restored);
+    free(inputCopy);
+    return pass;
+}
+
+static testResult runSilentRoundTrip(const char* name,
+                                     const unsigned char* input,
+                                     unsigned int inputSize) {
+    unsigned char* transformed = malloc(inputSize);
+    unsigned char* restored = malloc(inputSize);
+    unsigned char* inputCopy = malloc(inputSize);
+    if (!transformed || !restored || !inputCopy) {
+        free(transformed);
+        free(restored);
+        free(inputCopy);
+        return error;
+    }
+    memcpy(inputCopy, input, inputSize);
+
+    unsigned int bwtIndex = 0;
+    if (bwtTransform(inputCopy, inputSize, transformed, &bwtIndex) != success) {
+        fprintf(stdout, "FAIL: %s (bwtTransform error)\n", name);
+        free(transformed);
+        free(restored);
+        free(inputCopy);
+        return fail;
+    }
+    if (bwtRetransform(transformed, inputSize, restored, bwtIndex) != success ||
+        memcmp(inputCopy, restored, inputSize) != 0) {
+        fprintf(stdout, "FAIL: %s (round-trip mismatch, size %u)\n", name,
+                inputSize);
+        free(transformed);
+        free(restored);
+        free(inputCopy);
+        return fail;
+    }
+
+    fprintf(stdout, "PASS: %s\n", name);
+    free(transformed);
+    free(restored);
+    free(inputCopy);
+    return pass;
+}
+
+testResult exhaustiveBinarySmallTest() {
+    const char* name = "Exhaustive binary strings len 1..10 (oracle)";
+    unsigned char buf[10];
+    for (unsigned int len = 1; len <= 10; len++) {
+        unsigned int total = 1u << len;
+        for (unsigned int mask = 0; mask < total; mask++) {
+            for (unsigned int i = 0; i < len; i++) {
+                buf[i] = (unsigned char)((mask >> i) & 1u);
+            }
+            testResult r = verifyAgainstOracle(name, buf, len, true);
+            if (r != pass) return r;
+        }
+    }
+    fprintf(stdout, "PASS: %s\n", name);
+    return pass;
+}
+
+testResult bitvectorBoundarySizesTest() {
+    const char* name = "Bitvector byte-boundary sizes 1..33 (oracle)";
+    unsigned char buf[33];
+    unsigned int rng = 0x12345678u;
+    for (unsigned int len = 1; len <= 33; len++) {
+        // Zigzag (maximum LMS density, crossing 8/16/24/32-bit boundaries)
+        for (unsigned int i = 0; i < len; i++) {
+            buf[i] = (i & 1u) ? (unsigned char)(1u + (i % 3u)) : 200u;
+        }
+        testResult r = verifyAgainstOracle(name, buf, len, true);
+        if (r != pass) return r;
+
+        // Deterministic pseudo-random pattern
+        for (unsigned int i = 0; i < len; i++) {
+            rng = rng * 1103515245u + 12345u;
+            buf[i] = (unsigned char)((rng >> 16) % 5u);
+        }
+        r = verifyAgainstOracle(name, buf, len, true);
+        if (r != pass) return r;
+    }
+    fprintf(stdout, "PASS: %s\n", name);
+    return pass;
+}
+
+testResult noInteriorLmsTest() {
+    const char* name = "No interior LMS (lmsCount == 1, oracle)";
+    unsigned char buf[256];
+
+    // Strictly ascending: S..S, L, $ -> only sentinel is LMS
+    for (unsigned int i = 0; i < 256; i++) buf[i] = (unsigned char)i;
+    if (verifyAgainstOracle(name, buf, 256, true) != pass) return fail;
+
+    // Strictly descending: L..L, $ -> only sentinel is LMS
+    for (unsigned int i = 0; i < 256; i++) buf[i] = (unsigned char)(255u - i);
+    if (verifyAgainstOracle(name, buf, 256, true) != pass) return fail;
+
+    // Unimodal (ascending then descending): S..S, L..L, $ -> only sentinel LMS
+    for (unsigned int i = 0; i < 128; i++) buf[i] = (unsigned char)i;
+    for (unsigned int i = 0; i < 128; i++) buf[128 + i] = (unsigned char)(127u - i);
+    if (verifyAgainstOracle(name, buf, 256, true) != pass) return fail;
+
+    fprintf(stdout, "PASS: %s\n", name);
+    return pass;
+}
+
+testResult singleDiffInRunTest() {
+    const char* name = "Single differing byte in uniform run (oracle)";
+    const unsigned int sz = 129;
+    unsigned char buf[129];
+    unsigned int positions[3] = {0, sz / 2, sz - 1};
+    unsigned char baseVals[2] = {'a', 'z'};
+    unsigned char diffVals[2] = {'z', 'a'};
+
+    for (int v = 0; v < 2; v++) {
+        for (int p = 0; p < 3; p++) {
+            memset(buf, baseVals[v], sz);
+            buf[positions[p]] = diffVals[v];
+            if (verifyAgainstOracle(name, buf, sz, true) != pass) return fail;
+        }
+    }
+    fprintf(stdout, "PASS: %s\n", name);
+    return pass;
+}
+
+testResult nullAndMaxBytesTest() {
+    const char* name = "Null (0x00) and max (0xFF) byte boundaries (oracle)";
+    unsigned char buf[128];
+    for (unsigned int i = 0; i < sizeof(buf); i++) {
+        if (i == 0 || i == sizeof(buf) - 1 || (i % 7 == 0)) {
+            buf[i] = 0x00;
+        } else if (i % 5 == 0) {
+            buf[i] = 0xFF;
+        } else {
+            buf[i] = (unsigned char)(i % 4u);
+        }
+    }
+    return verifyAgainstOracle(name, buf, (unsigned int)sizeof(buf), false);
+}
+
+testResult lmsEndingAtSentinelTest() {
+    const char* name = "LMS substring ending at sentinel vs interior LMS (oracle)";
+    const char* cases[] = {
+        "babab",
+        "cababcabab",
+        "abacabadabacab",
+        "dcabdcabdcab",
+        "babaababa",
+    };
+    for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {
+        unsigned int len = (unsigned int)strlen(cases[c]);
+        if (verifyAgainstOracle(name, (const unsigned char*)cases[c], len,
+                                true) != pass) {
+            return fail;
+        }
+    }
+    fprintf(stdout, "PASS: %s\n", name);
+    return pass;
+}
+
+testResult nonRecursiveUniqueLmsTest() {
+    const char* name = "All-unique LMS substrings (no recursion path, oracle)";
+    // 60 distinct 3-byte blocks (250, x, y) -> 61 unique LMS, skips recursion
+    const unsigned int blocks = 60;
+    const unsigned int sz = blocks * 3;
+    unsigned char* buf = malloc(sz);
+    if (!buf) return error;
+    for (unsigned int b = 0; b < blocks; b++) {
+        buf[b * 3] = 250;
+        buf[b * 3 + 1] = (unsigned char)(1u + (b % 30u));
+        buf[b * 3 + 2] = (unsigned char)(40u + b);
+    }
+    testResult r = verifyAgainstOracle(name, buf, sz, false);
+    free(buf);
+    return r;
+}
+
+testResult recursiveTier2FreeSpaceTest() {
+    const char* name = "Recursive SA-IS Tier 2 (freeSpace/2 < alpha <= freeSpace, oracle)";
+    // 200 blocks of 3 bytes (250, x, y) with 0 < x < y < 250:
+    // Each block contributes exactly 1 LMS at offset 1 -> lmsCount = 201,
+    // saLen = 601, freeSpace = 601 - 2*201 = 199 (freeSpace/2 = 99).
+    // 150 distinct blocks + 50 repeated -> alphabetSize ~ 151 in (99, 199],
+    // exercising the zero-heap recomputed bucketBounds branch in recursiveSais.
+    const unsigned int blocks = 200;
+    const unsigned int uniqueBlocks = 150;
+    const unsigned int sz = blocks * 3;
+    unsigned char* buf = malloc(sz);
+    if (!buf) return error;
+    for (unsigned int b = 0; b < blocks; b++) {
+        unsigned int id = b % uniqueBlocks;
+        buf[b * 3] = 250;
+        buf[b * 3 + 1] = (unsigned char)(1u + (id / 10u));
+        buf[b * 3 + 2] = (unsigned char)(20u + (id % 10u) + (id / 10u));
+    }
+    testResult r = verifyAgainstOracle(name, buf, sz, false);
+    free(buf);
+    return r;
+}
+
+testResult recursiveTier3HeapFallbackEvenTest() {
+    const char* name = "Recursive SA-IS Tier 3 heap fallback (even saLen, freeSpace=0, oracle)";
+    // Odd len = 399 -> saLen = 400, zigzag puts LMS at every odd index
+    // 1, 3, ..., 399 -> lmsCount = 200 == saLen/2, freeSpace = 0.
+    // Repeated valley values force recursion with alphabetSize > freeSpace.
+    const unsigned int sz = 399;
+    unsigned char* buf = malloc(sz);
+    if (!buf) return error;
+    for (unsigned int i = 0; i < sz; i++) {
+        if ((i & 1u) == 0) {
+            buf[i] = 250;
+        } else {
+            buf[i] = (unsigned char)(1u + ((i >> 1) % 37u));
+        }
+    }
+    testResult r = verifyAgainstOracle(name, buf, sz, false);
+    free(buf);
+    return r;
+}
+
+testResult recursiveTier3HeapFallbackOddTest() {
+    const char* name = "Recursive SA-IS Tier 3 heap fallback (odd saLen, freeSpace=1, oracle)";
+    // Even len = 400 -> saLen = 401; zigzag up to 398, then two high bytes so
+    // LMS are 1, 3, ..., 397, and sentinel 400 -> lmsCount = 200, freeSpace = 1.
+    // Tests sentinel index = 400 -> lmsCount + (400 >> 1) == 400 == saLen - 1.
+    const unsigned int sz = 400;
+    unsigned char* buf = malloc(sz);
+    if (!buf) return error;
+    for (unsigned int i = 0; i < sz - 2; i++) {
+        if ((i & 1u) == 0) {
+            buf[i] = 250;
+        } else {
+            buf[i] = (unsigned char)(1u + ((i >> 1) % 29u));
+        }
+    }
+    buf[sz - 2] = 250;
+    buf[sz - 1] = 250;
+    testResult r = verifyAgainstOracle(name, buf, sz, false);
+    free(buf);
+    return r;
+}
+
+testResult nestedMultiLevelHeapFallbackTest() {
+    const char* name = "Nested multi-level recursion with tight freeSpace (oracle)";
+    // Hierarchically modulated zigzag: forces freeSpace == 0 at level 1 and
+    // repeated zigzag structure at deeper levels, stressing heapBucket release
+    // before recursion and stacked right-end reducedStr compaction.
+    const unsigned int sz = 1023;  // saLen = 1024
+    unsigned char* buf = malloc(sz);
+    if (!buf) return error;
+    for (unsigned int i = 0; i < sz; i++) {
+        if ((i & 1u) == 0) {
+            buf[i] = 200;
+        } else {
+            unsigned int k = i >> 1;
+            // Alternate high/low valley pairs to induce zigzag in reducedStr
+            unsigned char v = (k & 1u) ? (unsigned char)(10u + (k & 7u))
+                                       : (unsigned char)(100u + ((k >> 3) & 3u));
+            buf[i] = v;
+        }
+    }
+    testResult r = verifyAgainstOracle(name, buf, sz, false);
+    free(buf);
+    return r;
+}
+
+testResult thueMorseDeepRecursionTest() {
+    const char* name = "Thue-Morse 16384B (deep multi-level recursion + Tier 1)";
+    const unsigned int sz = 16384;
+    unsigned char* buf = malloc(sz);
+    if (!buf) return error;
+    for (unsigned int i = 0; i < sz; i++) {
+        unsigned int x = i;
+        unsigned int parity = 0;
+        while (x) {
+            parity ^= (x & 1u);
+            x >>= 1;
+        }
+        buf[i] = parity ? 'b' : 'a';
+    }
+    testResult r = runSilentRoundTrip(name, buf, sz);
+    free(buf);
+    return r;
+}
+
+testResult largeStructuredBlockTest() {
+    const char* name = "Large 200 KB mixed structured/random block round-trip";
+    const unsigned int sz = 200000;
+    unsigned char* buf = malloc(sz);
+    if (!buf) return error;
+    unsigned int rng = 0xCAFEBABEu;
+    for (unsigned int i = 0; i < sz; i++) {
+        if (i < 50000) {
+            // Repetitive motif with perturbations
+            buf[i] = (unsigned char)("abracadabra!0123"[i & 15u] ^
+                                     ((i % 257u == 0) ? 1u : 0u));
+        } else if (i < 100000) {
+            // Maximum-LMS zigzag section
+            buf[i] = (i & 1u) ? (unsigned char)((i >> 1) % 53u) : 255u;
+        } else if (i < 150000) {
+            // Long runs mixed with nulls
+            buf[i] = (unsigned char)((i / 17u) % 6u);
+        } else {
+            // Pseudo-random full-byte range
+            rng = rng * 1103515245u + 12345u;
+            buf[i] = (unsigned char)(rng >> 16);
+        }
+    }
+    testResult r = runSilentRoundTrip(name, buf, sz);
+    free(buf);
+    return r;
+}
+
+testResult retransformBoundaryIndexTest() {
+    const char* name = "Retransform boundary bwtIndex checks (0, 1, n, n+1)";
+    unsigned char out[8];
+    unsigned char data[] = "abc";
+    if (bwtRetransform(data, 3, out, 0) != generalError) {
+        fprintf(stdout, "FAIL: %s (bwtIndex=0 should fail)\n", name);
+        return fail;
+    }
+    if (bwtRetransform(data, 3, out, 4) != generalError) {
+        fprintf(stdout, "FAIL: %s (bwtIndex=n+1 should fail)\n", name);
+        return fail;
+    }
+    // bwtIndex == 1 ("ab" -> "ba", idx 1)
+    unsigned char abTrans[] = "ba";
+    if (bwtRetransform(abTrans, 2, out, 1) != success ||
+        memcmp(out, "ab", 2) != 0) {
+        fprintf(stdout, "FAIL: %s (bwtIndex=1 failed)\n", name);
+        return fail;
+    }
+    // bwtIndex == n ("ba" -> "ab", idx 2)
+    unsigned char baTrans[] = "ab";
+    if (bwtRetransform(baTrans, 2, out, 2) != success ||
+        memcmp(out, "ba", 2) != 0) {
+        fprintf(stdout, "FAIL: %s (bwtIndex=n failed)\n", name);
+        return fail;
+    }
+    fprintf(stdout, "PASS: %s\n", name);
+    return pass;
+}
+
 int main() {
     int counter[3] = {0};
     counter[transformationTest()]++;
@@ -456,6 +907,20 @@ int main() {
     counter[transformEmptyInputTest()]++;
     counter[retransformEmptyInputTest()]++;
     counter[retransformOutOfBoundsIndexTest()]++;
+    counter[exhaustiveBinarySmallTest()]++;
+    counter[bitvectorBoundarySizesTest()]++;
+    counter[noInteriorLmsTest()]++;
+    counter[singleDiffInRunTest()]++;
+    counter[nullAndMaxBytesTest()]++;
+    counter[lmsEndingAtSentinelTest()]++;
+    counter[nonRecursiveUniqueLmsTest()]++;
+    counter[recursiveTier2FreeSpaceTest()]++;
+    counter[recursiveTier3HeapFallbackEvenTest()]++;
+    counter[recursiveTier3HeapFallbackOddTest()]++;
+    counter[nestedMultiLevelHeapFallbackTest()]++;
+    counter[thueMorseDeepRecursionTest()]++;
+    counter[largeStructuredBlockTest()]++;
+    counter[retransformBoundaryIndexTest()]++;
 
     fprintf(stdout, "Tests completed, PASSES: %i, FAILS: %i, ERRORS:%i\n",
             counter[pass], counter[fail], counter[error]);
