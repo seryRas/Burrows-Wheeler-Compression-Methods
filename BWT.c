@@ -154,7 +154,8 @@ errors findSameSubstringsRec(unsigned int* input, unsigned int* sufArr,
     unsigned int* nameArr = malloc(sizeof(unsigned int) * (len + 1));
     if (!nameArr) return mallocErr;
     unsigned int savedNames = 0;
-    unsigned int* originalLmsIndexes = malloc(sizeof(unsigned int) * (len + 1));
+    unsigned int* originalLmsIndexes =
+        malloc(sizeof(unsigned int) * (lmsArr->indexAmount > 0 ? lmsArr->indexAmount : 1));
     if (!originalLmsIndexes) {
         freeAll(nameArr, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
         return mallocErr;
@@ -239,7 +240,7 @@ errors recursiveSais(unsigned int* input, RecSaisOut* output,
 
     LmsArray lmsIndexes = {.indexAmount = 0};
     if (!(lmsIndexes.array =
-              malloc(sizeof(unsigned int) * (output->size + 1)))) {
+              malloc(sizeof(unsigned int) * ((output->size / 2) + 2)))) {
         freeAll(typedOut, charCounts, NULL, NULL, NULL, NULL, NULL, NULL);
         return mallocErr;
     }
@@ -413,7 +414,8 @@ errors findSameSubstrings(unsigned char* input, unsigned int* sufArr,
     unsigned int name = 0;
     unsigned int* nameArr = malloc(sizeof(unsigned int) * (len + 1));
     if (!nameArr) return mallocErr;
-    unsigned int* originalLmsIndexes = malloc(sizeof(unsigned int) * (len + 1));
+    unsigned int* originalLmsIndexes =
+        malloc(sizeof(unsigned int) * (lmsArr->indexAmount > 0 ? lmsArr->indexAmount : 1));
     if (!originalLmsIndexes) {
         freeAll(nameArr, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
         return mallocErr;
@@ -498,7 +500,7 @@ errors bwtTransform(unsigned char* input, unsigned int inputSize,
 
     unsigned char* typedOut =
         calloc(BITVECTOR_BYTE_COUNT(inputSize), sizeof(unsigned char));
-    unsigned int* lmsArray = malloc(sizeof(unsigned int) * (inputSize + 1));
+    unsigned int* lmsArray = malloc(sizeof(unsigned int) * ((inputSize / 2) + 2));
     unsigned int* suffixArr = malloc((inputSize + 1) * sizeof(unsigned int));
 
     if (!typedOut || !lmsArray || !suffixArr) {

@@ -1,4 +1,11 @@
 #include "bzip2.h"
+#include <time.h>
+
+static inline double getElapsedTime(struct timespec* start,
+                                    struct timespec* end) {
+    return (double)(end->tv_sec - start->tv_sec) +
+           (double)(end->tv_nsec - start->tv_nsec) / 1e9;
+}
 
 static inline errors freeCompressBuffers(errors status, unsigned char* rle1,
                                          unsigned char* bwt, unsigned char* mtf,
@@ -23,16 +30,19 @@ static inline errors freeDecompressBuffers(errors status, unsigned char* rle2,
     return status;
 }
 
-errors bzip2CompressBlock(unsigned char* inputData, unsigned int dataSize,
-                          unsigned char** outputData, unsigned int* outputSize) {
+errors bzip2CompressBlockTimed(unsigned char* inputData, unsigned int dataSize,
+                               unsigned char** outputData,
+                               unsigned int* outputSize,
+                               bzip2StepTiming* timing) {
     if (dataSize == 0) {
         *outputData = NULL;
         *outputSize = 0;
         return success;
     }
 
+    struct timespec stepStart, stepEnd;
+
     bzip2Header header;
-    header.crc32 = 0;  // TODO: Implement CRC32 later
     header.bwtIndex = 0;
     header.origSize = dataSize;
     memset(header.inUseMap, 0, IN_USE_MAP_SIZE);
@@ -48,25 +58,38 @@ errors bzip2CompressBlock(unsigned char* inputData, unsigned int dataSize,
     unsigned int huffSize = 0;
 
     // 1. RLE 1
+    if (timing) clock_gettime(CLOCK_MONOTONIC, &stepStart);
     status =
         RLE1encode(inputData, dataSize, &rle1Out, &rle1Size, header.inUseMap);
+    if (timing) {
+        clock_gettime(CLOCK_MONOTONIC, &stepEnd);
+        timing->rle1Time += getElapsedTime(&stepStart, &stepEnd);
+    }
     if (status != success)
         return freeCompressBuffers(status, rle1Out, bwtOut, mtfOut, rle2Out,
                                    huffOut);
     header.rle1Size = rle1Size;
 
     // 2. BWT
+    if (timing) clock_gettime(CLOCK_MONOTONIC, &stepStart);
     bwtOut = malloc(rle1Size);
     if (!bwtOut)
         return freeCompressBuffers(mallocErr, rle1Out, bwtOut, mtfOut, rle2Out,
                                    huffOut);
 
     status = bwtTransform(rle1Out, rle1Size, bwtOut, &header.bwtIndex);
+    if (timing) {
+        clock_gettime(CLOCK_MONOTONIC, &stepEnd);
+        timing->bwtTime += getElapsedTime(&stepStart, &stepEnd);
+    }
+    free(rle1Out);
+    rle1Out = NULL;
     if (status != success)
         return freeCompressBuffers(status, rle1Out, bwtOut, mtfOut, rle2Out,
                                    huffOut);
 
     // 3. MTF
+    if (timing) clock_gettime(CLOCK_MONOTONIC, &stepStart);
     unsigned char mtfDict[AMOUNT_OF_VALUES];
     unsigned int dictSize = 0;
     for (int i = 0; i < AMOUNT_OF_VALUES; i++) {
@@ -81,21 +104,41 @@ errors bzip2CompressBlock(unsigned char* inputData, unsigned int dataSize,
                                    huffOut);
 
     status = MTFencode(bwtOut, rle1Size, mtfOut, mtfDict, dictSize);
+    if (timing) {
+        clock_gettime(CLOCK_MONOTONIC, &stepEnd);
+        timing->mtfTime += getElapsedTime(&stepStart, &stepEnd);
+    }
+    free(bwtOut);
+    bwtOut = NULL;
     if (status != success)
         return freeCompressBuffers(status, rle1Out, bwtOut, mtfOut, rle2Out,
                                    huffOut);
 
     // 4. RLE 2
+    if (timing) clock_gettime(CLOCK_MONOTONIC, &stepStart);
     unsigned int frequencyMap[ALPHABET_SIZE] = {0};
     status = RLE2encode(mtfOut, rle1Size, &rle2Out, &rle2Size, frequencyMap);
+    if (timing) {
+        clock_gettime(CLOCK_MONOTONIC, &stepEnd);
+        timing->rle2Time += getElapsedTime(&stepStart, &stepEnd);
+    }
+    free(mtfOut);
+    mtfOut = NULL;
     if (status != success)
         return freeCompressBuffers(status, rle1Out, bwtOut, mtfOut, rle2Out,
                                    huffOut);
     header.rle2Size = rle2Size;
 
     // 5. Huffman
+    if (timing) clock_gettime(CLOCK_MONOTONIC, &stepStart);
     status =
         huffmanEncode(frequencyMap, rle2Out, &huffOut, rle2Size, &huffSize);
+    if (timing) {
+        clock_gettime(CLOCK_MONOTONIC, &stepEnd);
+        timing->huffmanTime += getElapsedTime(&stepStart, &stepEnd);
+    }
+    free(rle2Out);
+    rle2Out = NULL;
     if (status != success)
         return freeCompressBuffers(status, rle1Out, bwtOut, mtfOut, rle2Out,
                                    huffOut);
@@ -115,9 +158,18 @@ errors bzip2CompressBlock(unsigned char* inputData, unsigned int dataSize,
                                huffOut);
 }
 
-errors bzip2DecompressBlock(unsigned char* inputData, unsigned int inputSize,
-                            unsigned char** outputData,
-                            unsigned int* outputSize) {
+errors bzip2CompressBlock(unsigned char* inputData, unsigned int dataSize,
+                          unsigned char** outputData,
+                          unsigned int* outputSize) {
+    return bzip2CompressBlockTimed(inputData, dataSize, outputData, outputSize,
+                                   NULL);
+}
+
+errors bzip2DecompressBlockTimed(unsigned char* inputData,
+                                 unsigned int inputSize,
+                                 unsigned char** outputData,
+                                 unsigned int* outputSize,
+                                 bzip2StepTiming* timing) {
     *outputData = NULL;
     *outputSize = 0;
 
@@ -133,6 +185,7 @@ errors bzip2DecompressBlock(unsigned char* inputData, unsigned int inputSize,
         return success;
     }
 
+    struct timespec stepStart, stepEnd;
     errors status;
     unsigned char* huffIn = inputData + sizeof(bzip2Header);
     unsigned char* rle2Dec = NULL;
@@ -143,22 +196,35 @@ errors bzip2DecompressBlock(unsigned char* inputData, unsigned int inputSize,
     unsigned int mtfDecSize = 0;
 
     // 1. Huffman Decode
+    if (timing) clock_gettime(CLOCK_MONOTONIC, &stepStart);
     status = huffmanDecode(huffIn, header.compressedSize, &rle2Dec,
                            &rle2DecSize, header.rle2Size);
+    if (timing) {
+        clock_gettime(CLOCK_MONOTONIC, &stepEnd);
+        timing->huffmanTime += getElapsedTime(&stepStart, &stepEnd);
+    }
     if (status != success || rle2DecSize != header.rle2Size) {
         return freeDecompressBuffers(status != success ? status : corruptedData,
                                      rle2Dec, mtfDec, bwtDec, rle1Dec);
     }
 
     // 2. RLE 2 Decode
+    if (timing) clock_gettime(CLOCK_MONOTONIC, &stepStart);
     status =
         RLE2decode(rle2Dec, rle2DecSize, &mtfDec, &mtfDecSize, header.rle1Size);
+    if (timing) {
+        clock_gettime(CLOCK_MONOTONIC, &stepEnd);
+        timing->rle2Time += getElapsedTime(&stepStart, &stepEnd);
+    }
+    free(rle2Dec);
+    rle2Dec = NULL;
     if (status != success || mtfDecSize != header.rle1Size) {
         return freeDecompressBuffers(status != success ? status : corruptedData,
                                      rle2Dec, mtfDec, bwtDec, rle1Dec);
     }
 
     // 3. MTF Decode
+    if (timing) clock_gettime(CLOCK_MONOTONIC, &stepStart);
     unsigned char mtfDict[AMOUNT_OF_VALUES];
     unsigned int dictSize = 0;
     for (int i = 0; i < AMOUNT_OF_VALUES; i++) {
@@ -170,26 +236,46 @@ errors bzip2DecompressBlock(unsigned char* inputData, unsigned int inputSize,
     bwtDec = malloc(header.rle1Size);
     if (!bwtDec)
         return freeDecompressBuffers(mallocErr, rle2Dec, mtfDec, bwtDec,
-                                     rle1Dec);
+                                      rle1Dec);
 
     status = MTFdecode(mtfDec, header.rle1Size, bwtDec, mtfDict, dictSize);
+    if (timing) {
+        clock_gettime(CLOCK_MONOTONIC, &stepEnd);
+        timing->mtfTime += getElapsedTime(&stepStart, &stepEnd);
+    }
+    free(mtfDec);
+    mtfDec = NULL;
     if (status != success)
         return freeDecompressBuffers(status, rle2Dec, mtfDec, bwtDec, rle1Dec);
 
     // 4. BWT Retransform
+    if (timing) clock_gettime(CLOCK_MONOTONIC, &stepStart);
     rle1Dec = malloc(header.rle1Size);
     if (!rle1Dec)
         return freeDecompressBuffers(mallocErr, rle2Dec, mtfDec, bwtDec,
                                      rle1Dec);
 
     status = bwtRetransform(bwtDec, header.rle1Size, rle1Dec, header.bwtIndex);
+    if (timing) {
+        clock_gettime(CLOCK_MONOTONIC, &stepEnd);
+        timing->bwtTime += getElapsedTime(&stepStart, &stepEnd);
+    }
+    free(bwtDec);
+    bwtDec = NULL;
     if (status != success)
         return freeDecompressBuffers(status, rle2Dec, mtfDec, bwtDec, rle1Dec);
 
     // 5. RLE 1 Decode
+    if (timing) clock_gettime(CLOCK_MONOTONIC, &stepStart);
     RLE1info rle1Info;
     RLE1infoInit(&rle1Info, rle1Dec, header.rle1Size);
     status = RLE1decode(&rle1Info, outputData, outputSize, header.origSize);
+    if (timing) {
+        clock_gettime(CLOCK_MONOTONIC, &stepEnd);
+        timing->rle1Time += getElapsedTime(&stepStart, &stepEnd);
+    }
+    free(rle1Dec);
+    rle1Dec = NULL;
     if (status != success || *outputSize != header.origSize) {
         if (*outputData) {
             free(*outputData);
@@ -203,6 +289,13 @@ errors bzip2DecompressBlock(unsigned char* inputData, unsigned int inputSize,
     return freeDecompressBuffers(success, rle2Dec, mtfDec, bwtDec, rle1Dec);
 }
 
+errors bzip2DecompressBlock(unsigned char* inputData, unsigned int inputSize,
+                            unsigned char** outputData,
+                            unsigned int* outputSize) {
+    return bzip2DecompressBlockTimed(inputData, inputSize, outputData,
+                                     outputSize, NULL);
+}
+
 #ifndef BZIP2_TEST
 
 #include <stdbool.h>
@@ -211,11 +304,13 @@ errors bzip2DecompressBlock(unsigned char* inputData, unsigned int inputSize,
 static int processCompressBlock(unsigned char* inputData, unsigned int dataSize,
                                 FILE* outputFile,
                                 unsigned long long* totalOrig,
-                                unsigned long long* totalComp) {
+                                unsigned long long* totalComp,
+                                bzip2StepTiming* stepTiming) {
     unsigned char* compressedData = NULL;
     unsigned int compressedSize = 0;
     errors status =
-        bzip2CompressBlock(inputData, dataSize, &compressedData, &compressedSize);
+        bzip2CompressBlockTimed(inputData, dataSize, &compressedData,
+                                &compressedSize, stepTiming);
     if (status != success) {
         fprintf(stderr, "Compression failed with error: %d\n", status);
         return status;
@@ -239,7 +334,8 @@ static int processCompressBlock(unsigned char* inputData, unsigned int dataSize,
 
 static int runCompression(const char* filePath, unsigned int blockSize,
                           unsigned long long* totalOrigBytes,
-                          unsigned long long* totalCompBytes) {
+                          unsigned long long* totalCompBytes,
+                          bzip2StepTiming* stepTiming) {
     char outPath[1024];
     snprintf(outPath, sizeof(outPath), "%s.bz2", filePath);
 
@@ -269,7 +365,8 @@ static int runCompression(const char* filePath, unsigned int blockSize,
     while ((bytesRead = fread(inputData, 1, blockSize, inputFile)) > 0) {
         unsigned int currentSize = (unsigned int)bytesRead;
         int status = processCompressBlock(inputData, currentSize, outputFile,
-                                          totalOrigBytes, totalCompBytes);
+                                          totalOrigBytes, totalCompBytes,
+                                          stepTiming);
         if (status != success) {
             free(inputData);
             fclose(inputFile);
@@ -307,7 +404,8 @@ static int runCompression(const char* filePath, unsigned int blockSize,
 
 static int runDecompression(const char* filePath,
                             unsigned long long* totalCompBytes,
-                            unsigned long long* totalOrigBytes) {
+                            unsigned long long* totalOrigBytes,
+                            bzip2StepTiming* stepTiming) {
     char outPath[1024];
     size_t len = strlen(filePath);
     if (len > 4 && strcmp(filePath + len - 4, ".bz2") == 0) {
@@ -381,9 +479,10 @@ static int runDecompression(const char* filePath,
 
         unsigned char* decompressedData = NULL;
         unsigned int decompressedSize = 0;
-        errors status = bzip2DecompressBlock(blockBuffer, blockSize,
-                                             &decompressedData,
-                                             &decompressedSize);
+        errors status = bzip2DecompressBlockTimed(blockBuffer, blockSize,
+                                                  &decompressedData,
+                                                  &decompressedSize,
+                                                  stepTiming);
         free(blockBuffer);
 
         if (status != success) {
@@ -520,13 +619,16 @@ int main(int argc, char** argv) {
 
     unsigned long long totalOrigBytes = 0;
     unsigned long long totalCompBytes = 0;
+    bzip2StepTiming stepTiming = {0};
     int status;
 
     if (decompress) {
-        status = runDecompression(filePath, &totalCompBytes, &totalOrigBytes);
+        status = runDecompression(filePath, &totalCompBytes, &totalOrigBytes,
+                                  timed ? &stepTiming : NULL);
     } else {
         status = runCompression(filePath, blockSize, &totalOrigBytes,
-                                &totalCompBytes);
+                                &totalCompBytes,
+                                timed ? &stepTiming : NULL);
     }
 
     if (status != success) {
@@ -537,7 +639,53 @@ int main(int argc, char** argv) {
         clock_gettime(CLOCK_MONOTONIC, &endTime);
         double elapsed = (double)(endTime.tv_sec - startTime.tv_sec) +
                          (double)(endTime.tv_nsec - startTime.tv_nsec) / 1e9;
-        printf("Total execution time: %.4f seconds\n", elapsed);
+        double sumSteps = stepTiming.rle1Time + stepTiming.bwtTime +
+                          stepTiming.mtfTime + stepTiming.rle2Time +
+                          stepTiming.huffmanTime;
+
+        printf("\n--- Step Timing Breakdown ---\n");
+        printf("Total execution time: %.4f s\n", elapsed);
+        if (decompress) {
+            printf("Decompression steps:\n");
+            printf("  1. Huffman Decode : %8.4f s (%8.2f ms) [%5.1f%%]\n",
+                   stepTiming.huffmanTime, stepTiming.huffmanTime * 1000.0,
+                   sumSteps > 0 ? (stepTiming.huffmanTime / sumSteps) * 100.0 : 0.0);
+            printf("  2. RLE 2 Decode   : %8.4f s (%8.2f ms) [%5.1f%%]\n",
+                   stepTiming.rle2Time, stepTiming.rle2Time * 1000.0,
+                   sumSteps > 0 ? (stepTiming.rle2Time / sumSteps) * 100.0 : 0.0);
+            printf("  3. MTF Decode     : %8.4f s (%8.2f ms) [%5.1f%%]\n",
+                   stepTiming.mtfTime, stepTiming.mtfTime * 1000.0,
+                   sumSteps > 0 ? (stepTiming.mtfTime / sumSteps) * 100.0 : 0.0);
+            printf("  4. BWT Retransform: %8.4f s (%8.2f ms) [%5.1f%%]\n",
+                   stepTiming.bwtTime, stepTiming.bwtTime * 1000.0,
+                   sumSteps > 0 ? (stepTiming.bwtTime / sumSteps) * 100.0 : 0.0);
+            printf("  5. RLE 1 Decode   : %8.4f s (%8.2f ms) [%5.1f%%]\n",
+                   stepTiming.rle1Time, stepTiming.rle1Time * 1000.0,
+                   sumSteps > 0 ? (stepTiming.rle1Time / sumSteps) * 100.0 : 0.0);
+        } else {
+            printf("Compression steps:\n");
+            printf("  1. RLE 1 Encode   : %8.4f s (%8.2f ms) [%5.1f%%]\n",
+                   stepTiming.rle1Time, stepTiming.rle1Time * 1000.0,
+                   sumSteps > 0 ? (stepTiming.rle1Time / sumSteps) * 100.0 : 0.0);
+            printf("  2. BWT Transform  : %8.4f s (%8.2f ms) [%5.1f%%]\n",
+                   stepTiming.bwtTime, stepTiming.bwtTime * 1000.0,
+                   sumSteps > 0 ? (stepTiming.bwtTime / sumSteps) * 100.0 : 0.0);
+            printf("  3. MTF Encode     : %8.4f s (%8.2f ms) [%5.1f%%]\n",
+                   stepTiming.mtfTime, stepTiming.mtfTime * 1000.0,
+                   sumSteps > 0 ? (stepTiming.mtfTime / sumSteps) * 100.0 : 0.0);
+            printf("  4. RLE 2 Encode   : %8.4f s (%8.2f ms) [%5.1f%%]\n",
+                   stepTiming.rle2Time, stepTiming.rle2Time * 1000.0,
+                   sumSteps > 0 ? (stepTiming.rle2Time / sumSteps) * 100.0 : 0.0);
+            printf("  5. Huffman Encode : %8.4f s (%8.2f ms) [%5.1f%%]\n",
+                   stepTiming.huffmanTime, stepTiming.huffmanTime * 1000.0,
+                   sumSteps > 0 ? (stepTiming.huffmanTime / sumSteps) * 100.0 : 0.0);
+        }
+        double otherTime = elapsed - sumSteps;
+        if (otherTime < 0) otherTime = 0;
+        printf("  I/O & overhead    : %8.4f s (%8.2f ms) [%5.1f%%]\n",
+               otherTime, otherTime * 1000.0,
+               elapsed > 0 ? (otherTime / elapsed) * 100.0 : 0.0);
+        printf("-----------------------------\n");
     }
 
     return success;
